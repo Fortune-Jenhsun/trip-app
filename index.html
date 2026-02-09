@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>大阪自由行助手 Pro</title>
+    <title>自由行小幫手</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -94,8 +94,11 @@
             opacity: 0; cursor: pointer;
         }
 
-        .category-dot { transition: all 0.3s ease; cursor: pointer; }
-        .category-dot:active { transform: scale(0.9); }
+        .category-dot { 
+            transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); 
+            cursor: pointer; 
+        }
+        .category-dot:active { transform: scale(0.8); }
         
         .check-item-done { text-decoration: line-through; opacity: 0.5; }
     </style>
@@ -121,6 +124,11 @@
                     {{ mainTitle }}
                     <i class="fa-solid fa-pen text-[10px] ml-2 text-gray-300"></i>
                 </h1>
+            </div>
+            <div class="flex gap-2">
+                <button @click="resetAll" class="text-[10px] bg-red-50 text-red-500 px-3 py-1.5 rounded-full font-bold active:scale-95 transition-transform">
+                    重設
+                </button>
             </div>
         </header>
 
@@ -162,18 +170,23 @@
                             <i class="fa-solid fa-map-location-dot text-2xl text-gray-400"></i>
                         </div>
                         <p>這天還沒有行程安排</p>
+                        <button @click="openAddModal" class="mt-4 text-blue-500 font-bold text-sm">+ 點擊新增行程</button>
                     </div>
 
                     <div v-else class="space-y-4 relative mt-2">
                         <div class="timeline-line"></div>
                         <div v-for="(event) in currentDayEvents" :key="event.id" class="relative pl-14">
+                            <!-- 左側時間與類別圖示 -->
                             <div class="absolute left-0 top-0 flex flex-col items-center w-12 z-10">
                                 <span class="text-[10px] font-bold text-gray-400 mb-1">{{ event.time }}</span>
-                                <div @click.stop="toggleDetail(event.id)" class="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm shadow-md border-4 border-white category-dot hover:brightness-110" :class="getTypeColor(event.type)">
-                                    <i :class="getTypeIcon(event.type)"></i>
+                                <div @click.stop="toggleDetail(event.id)" 
+                                     class="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm shadow-md border-4 border-white category-dot hover:brightness-110" 
+                                     :class="getTypeColor(event.type)">
+                                    <i :class="['fa-solid', getTypeIcon(event.type)]"></i>
                                 </div>
                             </div>
 
+                            <!-- 右側行程卡片 -->
                             <div @click="toggleDetail(event.id)" class="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 active:scale-[0.98] transition-transform duration-100 cursor-pointer">
                                 <div class="flex justify-between items-start">
                                     <h3 class="font-bold text-gray-800 text-lg leading-tight">{{ event.location }}</h3>
@@ -208,7 +221,6 @@
                 <h2 class="text-xl font-bold text-gray-800 mb-6 flex items-center">
                     <i class="fa-solid fa-wallet mr-2 text-blue-500"></i> 預算統計
                 </h2>
-                
                 <div class="grid grid-cols-2 gap-4 mb-6">
                     <div class="bg-white p-4 rounded-3xl shadow-sm border border-gray-100">
                         <p class="text-[10px] font-bold text-gray-400 uppercase">總日圓花費</p>
@@ -219,7 +231,6 @@
                         <p class="text-2xl font-bold text-blue-500 mt-1">NT$ {{ totalTWD.toLocaleString() }}</p>
                     </div>
                 </div>
-
                 <div class="space-y-3">
                     <h3 class="text-sm font-bold text-gray-500 px-1">每日花費清單</h3>
                     <div v-for="(day, idx) in days" :key="idx" class="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
@@ -243,7 +254,6 @@
                     </h2>
                     <button @click="addCheckItem" class="text-blue-600 text-sm font-bold">+ 新增項目</button>
                 </div>
-
                 <div class="space-y-3">
                     <div v-for="(item, idx) in checklist" :key="idx" 
                          @click="toggleCheck(idx)"
@@ -258,10 +268,6 @@
                         <button @click.stop="removeCheckItem(idx)" class="text-gray-300 hover:text-red-400">
                             <i class="fa-solid fa-xmark"></i>
                         </button>
-                    </div>
-                    
-                    <div v-if="checklist.length === 0" class="text-center py-12 text-gray-400">
-                        <p class="text-sm">點擊上方按鈕新增準備事項</p>
                     </div>
                 </div>
             </div>
@@ -283,7 +289,7 @@
             </button>
         </nav>
 
-        <!-- 彈窗 (與原本相同) -->
+        <!-- 彈窗 -->
         <transition name="slide-up">
             <div v-if="showModal" class="fixed inset-0 z-50 flex items-end">
                 <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" @click="closeModal"></div>
@@ -299,10 +305,10 @@
                             <div>
                                 <label class="block text-xs font-bold text-gray-400 mb-2 uppercase">類別</label>
                                 <select v-model="form.type" class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm">
-                                    <option value="sight">景點</option>
-                                    <option value="food">美食</option>
-                                    <option value="shopping">購物</option>
-                                    <option value="transport">交通</option>
+                                    <option value="sight">景點 (📸)</option>
+                                    <option value="food">美食 (🍜)</option>
+                                    <option value="shopping">購物 (🛍️)</option>
+                                    <option value="transport">交通 (🚃)</option>
                                 </select>
                             </div>
                         </div>
@@ -348,24 +354,18 @@
 
     createApp({
         setup() {
-            const STORAGE_KEY = 'osakaTripPro_v4';
             const mainTitle = ref('我的日本旅行');
             const isEditingMainTitle = ref(false);
             const mainTitleInput = ref(null);
             const startDate = ref(new Date().toISOString().split('T')[0]);
             const currentView = ref('list');
             
-            const days = ref([
-                { date: '', events: [
-                    { id: 1, time: '14:00', location: '關西國際機場', type: 'transport', note: '領取周遊券', cost: 3000, currency: 'JPY', mapUrl: '' }
-                ] }
-            ]);
-
+            const days = ref([{ date: '', events: [] }]);
             const checklist = ref([
                 { text: '護照', done: false },
-                { text: 'Visit Japan Web 申報', done: false },
-                { text: '網卡/Wi-Fi機', done: false },
-                { text: '日幣現金', done: false }
+                { text: '機票確認單', done: false },
+                { text: '日本網卡/WiFi', done: false },
+                { text: '外幣現金/信用卡', done: false }
             ]);
 
             const currentDayIndex = ref(0);
@@ -374,25 +374,38 @@
             const expandedEventId = ref(null);
             const form = ref({ id: null, time: '09:00', location: '', type: 'sight', note: '', cost: '', currency: 'JPY', mapUrl: '' });
 
-            // 載入與儲存
-            const loadData = () => {
-                const saved = localStorage.getItem(STORAGE_KEY);
+            const saveToLocal = () => {
+                const data = {
+                    days: JSON.parse(JSON.stringify(days.value)),
+                    startDate: startDate.value,
+                    mainTitle: mainTitle.value,
+                    checklist: checklist.value
+                };
+                localStorage.setItem('osaka_trip_data_v2', JSON.stringify(data));
+            };
+
+            const loadFromLocal = () => {
+                const saved = localStorage.getItem('osaka_trip_data_v2');
                 if (saved) {
-                    const parsed = JSON.parse(saved);
-                    days.value = parsed.days || days.value;
-                    startDate.value = parsed.startDate || startDate.value;
-                    mainTitle.value = parsed.mainTitle || mainTitle.value;
-                    checklist.value = parsed.checklist || checklist.value;
+                    const data = JSON.parse(saved);
+                    days.value = data.days || days.value;
+                    startDate.value = data.startDate || startDate.value;
+                    mainTitle.value = data.mainTitle || mainTitle.value;
+                    checklist.value = data.checklist || checklist.value;
                     recalculateAllDates();
                 }
             };
-            const saveData = () => {
-                localStorage.setItem(STORAGE_KEY, JSON.stringify({
-                    days: days.value, startDate: startDate.value, mainTitle: mainTitle.value, checklist: checklist.value
-                }));
+
+            const resetAll = () => {
+                if(confirm('確定要清除所有行程嗎？此動作無法復原。')) {
+                    localStorage.removeItem('osaka_trip_data_v2');
+                    location.reload();
+                }
             };
-            onMounted(loadData);
-            watch([days, mainTitle, startDate, checklist], saveData, { deep: true });
+
+            watch([days, mainTitle, startDate, checklist], () => {
+                saveToLocal();
+            }, { deep: true });
 
             const recalculateAllDates = () => {
                 const start = new Date(startDate.value);
@@ -405,7 +418,12 @@
 
             const handleStartDateChange = () => recalculateAllDates();
             const formatDisplayDate = (d) => d ? `${new Date(d).getMonth() + 1}/${new Date(d).getDate()}` : '';
-            const currentDayEvents = computed(() => [...days.value[currentDayIndex.value].events].sort((a,b) => a.time.localeCompare(b.time)));
+            
+            const currentDayEvents = computed(() => {
+                const currentDay = days.value[currentDayIndex.value];
+                if (!currentDay || !currentDay.events) return [];
+                return [...currentDay.events].sort((a,b) => a.time.localeCompare(b.time));
+            });
 
             const addDay = () => {
                 days.value.push({ date: '', events: [] });
@@ -413,12 +431,10 @@
                 currentDayIndex.value = days.value.length - 1;
             };
 
-            // 預算邏輯
-            const getDayTotal = (day, curr) => day.events.reduce((sum, e) => e.currency === curr ? sum + (Number(e.cost) || 0) : sum, 0);
+            const getDayTotal = (day, curr) => (day.events || []).reduce((sum, e) => e.currency === curr ? sum + (Number(e.cost) || 0) : sum, 0);
             const totalJPY = computed(() => days.value.reduce((sum, d) => sum + getDayTotal(d, 'JPY'), 0));
             const totalTWD = computed(() => days.value.reduce((sum, d) => sum + getDayTotal(d, 'TWD'), 0));
 
-            // 清單邏輯
             const toggleCheck = (idx) => checklist.value[idx].done = !checklist.value[idx].done;
             const addCheckItem = () => {
                 const text = prompt("輸入準備事項：");
@@ -426,33 +442,60 @@
             };
             const removeCheckItem = (idx) => checklist.value.splice(idx, 1);
 
-            // 行程邏輯
             const openAddModal = () => { isEditing.value = false; form.value = { id: Date.now(), time: '09:00', location: '', type: 'sight', note: '', cost: '', currency: 'JPY', mapUrl: '' }; showModal.value = true; };
             const openEditModal = (ev) => { isEditing.value = true; form.value = { ...ev }; showModal.value = true; };
             const closeModal = () => showModal.value = false;
+            
             const saveEvent = () => {
-                const target = days.value[currentDayIndex.value].events;
+                if (!form.value.location) return;
+                const targetDay = days.value[currentDayIndex.value];
+                if (!targetDay.events) targetDay.events = [];
                 if (isEditing.value) {
-                    const idx = target.findIndex(e => e.id === form.value.id);
-                    if (idx !== -1) target[idx] = { ...form.value };
-                } else { target.push({ ...form.value }); }
+                    const idx = targetDay.events.findIndex(e => e.id === form.value.id);
+                    if (idx !== -1) targetDay.events[idx] = { ...form.value };
+                } else { targetDay.events.push({ ...form.value }); }
                 closeModal();
             };
-            const deleteEvent = (id) => { if(confirm('確定刪除？')) days.value[currentDayIndex.value].events = days.value[currentDayIndex.value].events.filter(e => e.id !== id); };
+            
+            const deleteEvent = (id) => { if(confirm('確定刪除此行程？')) days.value[currentDayIndex.value].events = days.value[currentDayIndex.value].events.filter(e => e.id !== id); };
             const toggleDetail = (id) => expandedEventId.value = expandedEventId.value === id ? null : id;
             const openGoogleMaps = (e) => window.open(e.mapUrl || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(e.location)}`, '_blank');
             const editMainTitle = () => { isEditingMainTitle.value = true; nextTick(() => mainTitleInput.value?.focus()); };
             const saveMainTitle = () => isEditingMainTitle.value = false;
 
-            const getTypeIcon = (t) => ({ sight: 'fa-camera', food: 'fa-utensils', shopping: 'fa-bag-shopping', transport: 'fa-train' }[t] || 'fa-location-dot');
-            const getTypeColor = (t) => ({ sight: 'bg-pink-500', food: 'bg-orange-500', shopping: 'bg-purple-500', transport: 'bg-blue-500' }[t] || 'bg-gray-400');
+            // 類別 Icon 配置
+            const getTypeIcon = (t) => {
+                const icons = { 
+                    sight: 'fa-camera', 
+                    food: 'fa-utensils', 
+                    shopping: 'fa-bag-shopping', 
+                    transport: 'fa-train' 
+                };
+                return icons[t] || 'fa-location-dot';
+            };
+
+            // 類別顏色配置
+            const getTypeColor = (t) => {
+                const colors = { 
+                    sight: 'bg-pink-500', 
+                    food: 'bg-orange-500', 
+                    shopping: 'bg-purple-500', 
+                    transport: 'bg-blue-500' 
+                };
+                return colors[t] || 'bg-gray-400';
+            };
+
+            onMounted(() => {
+                loadFromLocal();
+                recalculateAllDates();
+            });
 
             return {
                 mainTitle, isEditingMainTitle, mainTitleInput, editMainTitle, saveMainTitle,
                 startDate, handleStartDateChange, days, currentDayIndex, currentDayEvents,
                 showModal, isEditing, form, expandedEventId, currentView,
                 checklist, toggleCheck, addCheckItem, removeCheckItem,
-                totalJPY, totalTWD, getDayTotal,
+                totalJPY, totalTWD, getDayTotal, resetAll,
                 formatDisplayDate, addDay, openAddModal, openEditModal, closeModal, saveEvent, deleteEvent, toggleDetail, openGoogleMaps, getTypeIcon, getTypeColor
             };
         }

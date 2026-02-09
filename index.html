@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>自由行小工具</title>
+    <title>大阪自由行助手 Pro - 雲端版</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -45,8 +45,8 @@
             setup() {
                 const userId = ref(null);
                 const isLoading = ref(true);
-                const isSaving = ref(false);
-                const localLastUpdated = ref(0);
+                const isSaving = ref(false); // 用於防止同步循環
+                const localLastUpdated = ref(0); // 紀錄本地最後修改時間
 
                 const mainTitle = ref('我的日本旅行');
                 const isEditingMainTitle = ref(false);
@@ -67,8 +67,10 @@
                 const expandedEventId = ref(null);
                 const form = ref({ id: null, time: '09:00', location: '', type: 'sight', note: '', cost: '', currency: 'JPY', mapUrl: '' });
 
+                // 核心：雲端儲存邏輯 (增加防抖與版本標記)
                 const saveToCloud = async () => {
                     if (!userId.value || isLoading.value) return;
+                    
                     isSaving.value = true;
                     const timestamp = new Date().getTime();
                     localLastUpdated.value = timestamp;
@@ -79,27 +81,31 @@
                             startDate: startDate.value,
                             mainTitle: mainTitle.value,
                             checklist: checklist.value,
-                            updatedAt: timestamp
+                            updatedAt: timestamp // 紀錄這個版本的時間戳記
                         };
                         await setDoc(doc(db, "user_trips", userId.value), data);
                     } catch (e) {
                         console.error("儲存失敗: ", e);
                     } finally {
+                        // 延遲解除鎖定，避免 Firebase 回傳的快照瞬間觸發更新
                         setTimeout(() => { isSaving.value = false; }, 1000);
                     }
                 };
 
                 onMounted(() => {
                     signInAnonymously(auth).catch(err => console.error("登入失敗", err));
+
                     onAuthStateChanged(auth, (user) => {
                         if (user) {
                             userId.value = user.uid;
-                            const appId = typeof __app_id !== 'undefined' ? __app_id : 'travel-helper';
-                            onSnapshot(doc(db, "artifacts", appId, "public", "data", user.uid), (docSnap) => {
+                            onSnapshot(doc(db, "user_trips", user.uid), (docSnap) => {
+                                // 重要：如果目前正在儲存中，或雲端資料版本較舊，則不更新本地資料
                                 if (isSaving.value) return;
+
                                 if (docSnap.exists()) {
                                     const data = docSnap.data();
                                     const cloudUpdatedAt = data.updatedAt || 0;
+
                                     if (cloudUpdatedAt > localLastUpdated.value) {
                                         days.value = data.days || days.value;
                                         startDate.value = data.startDate || startDate.value;
@@ -117,6 +123,7 @@
                     });
                 });
 
+                // 只有當資料真的改變時才觸發儲存
                 watch([days, mainTitle, startDate, checklist], () => {
                     if (!isLoading.value && !isSaving.value) {
                         saveToCloud();
@@ -132,23 +139,11 @@
                     });
                 };
 
-                const handleStartDateChange = (event) => {
-                    startDate.value = event.target.value;
+                const handleStartDateChange = () => {
                     recalculateAllDates();
                 };
 
-                const formatDisplayDate = (d) => {
-                    if (!d) return '';
-                    const dateObj = new Date(d);
-                    return `${dateObj.getMonth() + 1}/${dateObj.getDate()}`;
-                };
-
-                const formatFullDate = (d) => {
-                    if (!d) return '';
-                    const dateObj = new Date(d);
-                    const week = ['日', '一', '二', '三', '四', '五', '六'][dateObj.getDay()];
-                    return `${dateObj.getFullYear()}年${dateObj.getMonth() + 1}月${dateObj.getDate()}日 (週${week})`;
-                };
+                const formatDisplayDate = (d) => d ? `${new Date(d).getMonth() + 1}/${new Date(d).getDate()}` : '';
                 
                 const currentDayEvents = computed(() => {
                     const currentDay = days.value[currentDayIndex.value];
@@ -190,15 +185,7 @@
                 
                 const deleteEvent = (id) => { if(confirm('確定刪除此行程？')) days.value[currentDayIndex.value].events = days.value[currentDayIndex.value].events.filter(e => e.id !== id); };
                 const toggleDetail = (id) => expandedEventId.value = expandedEventId.value === id ? null : id;
-                
-                const openGoogleMaps = (e) => {
-                    // 如果用戶有填寫 mapUrl 則優先使用，否則使用 location 關鍵字搜尋
-                    const url = e.mapUrl && e.mapUrl.trim() !== '' 
-                        ? e.mapUrl 
-                        : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(e.location)}`;
-                    window.open(url, '_blank');
-                };
-
+                const openGoogleMaps = (e) => window.open(e.mapUrl || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(e.location)}`, '_blank');
                 const editMainTitle = () => { isEditingMainTitle.value = true; nextTick(() => mainTitleInput.value?.focus()); };
                 const saveMainTitle = () => isEditingMainTitle.value = false;
 
@@ -218,7 +205,7 @@
                     showModal, isEditing, form, expandedEventId, currentView,
                     checklist, toggleCheck, addCheckItem, removeCheckItem,
                     totalJPY, totalTWD, getDayTotal,
-                    formatDisplayDate, formatFullDate, addDay, openAddModal, openEditModal, closeModal, saveEvent, deleteEvent, toggleDetail, openGoogleMaps, getTypeIcon, getTypeColor
+                    formatDisplayDate, addDay, openAddModal, openEditModal, closeModal, saveEvent, deleteEvent, toggleDetail, openGoogleMaps, getTypeIcon, getTypeColor
                 };
             }
         }).mount('#app');
@@ -233,33 +220,66 @@
         .fade-in { animation: fadeIn 0.3s ease-in; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         
+        /* 載入遮罩優化版 */
         .loading-overlay { 
-            position: absolute; inset: 0; background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); 
-            z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; color: white;
+            position: absolute; 
+            inset: 0; 
+            background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); 
+            z-index: 100; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            justify-content: center;
+            color: white;
         }
 
-        .plane-box { position: relative; font-size: 3rem; animation: flight 2s infinite ease-in-out; }
-        .cloud-bg { position: absolute; font-size: 1.5rem; opacity: 0.4; animation: drift 3s infinite linear; }
-        @keyframes flight { 0%, 100% { transform: translateY(0) rotate(5deg); } 50% { transform: translateY(-15px) rotate(-5deg); } }
-        @keyframes drift { 0% { transform: translateX(100px); opacity: 0; } 100% { transform: translateX(-100px); opacity: 0; } }
-        .loading-text { margin-top: 2rem; font-weight: 700; letter-spacing: 0.1em; animation: pulse 1.5s infinite; }
-        @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.7; transform: scale(0.95); } }
+        .plane-box {
+            position: relative;
+            font-size: 3rem;
+            animation: flight 2s infinite ease-in-out;
+        }
+
+        .cloud-bg {
+            position: absolute;
+            font-size: 1.5rem;
+            opacity: 0.4;
+            animation: drift 3s infinite linear;
+        }
+
+        @keyframes flight {
+            0%, 100% { transform: translateY(0) rotate(5deg); }
+            50% { transform: translateY(-15px) rotate(-5deg); }
+        }
+
+        @keyframes drift {
+            0% { transform: translateX(100px); opacity: 0; }
+            100% { transform: translateX(-100px); opacity: 0; }
+        }
+
+        .loading-text {
+            margin-top: 2rem;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.7; transform: scale(0.95); }
+        }
 
         .category-dot { transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); cursor: pointer; }
         .check-item-done { text-decoration: line-through; opacity: 0.5; }
         .slide-up-enter-active, .slide-up-leave-active { transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
         .slide-up-enter-from, .slide-up-leave-to { transform: translateY(100%); }
 
-        /* 日期選擇卡片 */
-        .date-selector-card {
-            position: relative; overflow: hidden; min-width: 100px; display: flex; 
+        .start-date-config { 
+            position: relative; overflow: hidden; min-width: 80px; display: flex; 
             flex-direction: column; align-items: center; justify-content: center; 
-            background-color: #f0f9ff; border: 1.5px solid #bae6fd; border-radius: 20px; 
-            padding: 10px; color: #0369a1; cursor: pointer; transition: all 0.2s;
+            background-color: #eff6ff; border: 1px solid #dbeafe; border-radius: 16px; 
+            padding: 8px; color: #2563eb; cursor: pointer; 
         }
-        .date-selector-card:active { transform: scale(0.95); background-color: #e0f2fe; }
-        .date-input-hidden { position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; z-index: 10; }
-        .day-active-indicator { width: 4px; height: 4px; background: white; border-radius: 50%; margin-top: 4px; }
+        .date-input-hidden { position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
     </style>
 </head>
 <body>
@@ -267,14 +287,14 @@
 <div id="app">
     <div class="app-container">
         
-        <!-- 載入中遮罩 -->
+        <!-- 質感雲端同步載入中狀態 -->
         <transition name="fade">
             <div v-if="isLoading" class="loading-overlay">
                 <div class="cloud-bg" style="top: 35%; right: 20%; animation-delay: 0s;"><i class="fa-solid fa-cloud"></i></div>
                 <div class="cloud-bg" style="top: 45%; left: 15%; animation-delay: 1.5s;"><i class="fa-solid fa-cloud"></i></div>
                 <div class="plane-box"><i class="fa-solid fa-plane"></i></div>
                 <div class="loading-text"><span class="text-sm">正在同步雲端行程...</span></div>
-                <div class="absolute bottom-10 text-[10px] opacity-40 uppercase tracking-widest">Travel Assistant</div>
+                <div class="absolute bottom-10 text-[10px] opacity-40 uppercase tracking-widest">Osaka Travel Assistant Pro</div>
             </div>
         </transition>
         
@@ -290,7 +310,7 @@
             </div>
             <div class="flex items-center gap-2">
                 <div class="text-[9px] text-green-500 font-bold bg-green-50 px-2 py-1 rounded-full flex items-center gap-1 shadow-sm">
-                    <i class="fa-solid fa-cloud"></i> 雲端同步
+                    <i class="fa-solid fa-cloud"></i> 雲端同步中
                 </div>
             </div>
         </header>
@@ -300,41 +320,23 @@
             
             <!-- 行程列表 -->
             <div v-show="currentView === 'list'" class="flex-1 flex flex-col h-full fade-in">
-                
-                <!-- 水平捲動導覽列 -->
                 <div class="bg-white shrink-0 px-2 py-4 z-10 overflow-x-auto no-scrollbar whitespace-nowrap border-b border-gray-100">
                     <div class="flex space-x-3 px-2 items-stretch">
-                        <!-- 設定首日 -->
-                        <div class="date-selector-card shadow-sm group">
-                            <span class="text-[9px] font-extrabold uppercase opacity-60 mb-1 tracking-tighter">Start Date</span>
-                            <span class="text-[13px] font-black">{{ formatDisplayDate(startDate) }}</span>
-                            <div class="text-[8px] mt-1 text-sky-400 font-bold"><i class="fa-solid fa-calendar-days"></i> 修改首日</div>
-                            <input type="date" :value="startDate" @change="handleStartDateChange" class="date-input-hidden">
+                        <div class="start-date-config shadow-sm">
+                            <i class="fa-solid fa-calendar-day text-xs mb-1"></i>
+                            <span class="text-[10px] font-bold">設定首日</span>
+                            <input type="date" v-model="startDate" @change="handleStartDateChange" class="date-input-hidden">
                         </div>
-
-                        <div class="w-px bg-gray-100 mx-1 my-2"></div>
-
-                        <!-- DAY 區塊 -->
                         <div v-for="(day, index) in days" :key="index" @click="currentDayIndex = index"
-                            class="px-3 py-3 rounded-[24px] flex-shrink-0 flex flex-col items-center min-w-[85px] cursor-pointer transition-all duration-300"
-                            :class="currentDayIndex === index ? 'bg-blue-600 text-white shadow-xl scale-105 -translate-y-0.5' : 'bg-gray-50 text-gray-400'">
-                            <span class="text-[9px] font-black opacity-80 mb-0.5 tracking-widest">DAY {{ index + 1 }}</span>
-                            <span class="text-[13px] font-bold">{{ formatDisplayDate(day.date) }}</span>
-                            <div v-if="currentDayIndex === index" class="day-active-indicator"></div>
+                            class="px-3 py-2 rounded-2xl flex-shrink-0 flex flex-col items-center min-w-[90px] cursor-pointer transition-all"
+                            :class="currentDayIndex === index ? 'bg-blue-600 text-white shadow-lg scale-105' : 'bg-gray-50 text-gray-400'">
+                            <span class="text-[9px] font-bold opacity-80 mb-0.5">DAY {{ index + 1 }}</span>
+                            <span class="text-[11px] font-bold">{{ formatDisplayDate(day.date) }}</span>
                         </div>
-
-                        <button @click="addDay" class="px-5 py-2 rounded-2xl bg-gray-50 text-blue-400 border border-dashed border-blue-200 min-w-[60px] active:bg-blue-50">
+                        <button @click="addDay" class="px-5 py-2 rounded-2xl bg-gray-50 text-blue-500 border border-dashed border-blue-200 min-w-[75px]">
                             <i class="fa-solid fa-plus text-xs"></i>
                         </button>
                     </div>
-                </div>
-
-                <div class="bg-white px-6 py-2 shrink-0 border-b border-gray-50 flex items-center justify-between">
-                    <span class="text-xs font-bold text-gray-500">
-                        <i class="fa-regular fa-calendar-check mr-1 text-blue-500"></i> 
-                        {{ formatFullDate(days[currentDayIndex]?.date) }}
-                    </span>
-                    <span class="text-[10px] text-gray-300 font-bold uppercase tracking-widest">Day {{ currentDayIndex + 1 }}</span>
                 </div>
 
                 <main class="flex-1 overflow-y-auto no-scrollbar relative p-4 bg-gray-50 pb-24">
@@ -363,9 +365,7 @@
                                 </div>
                                 <div v-if="expandedEventId === event.id" class="mt-4 pt-3 border-t border-gray-100 fade-in">
                                     <div class="grid grid-cols-2 gap-2 mb-2">
-                                        <button @click.stop="openGoogleMaps(event)" class="bg-blue-50 text-blue-600 py-2 rounded-xl text-sm font-bold flex items-center justify-center gap-2">
-                                            <i class="fa-solid fa-location-arrow"></i> 開啟地圖
-                                        </button>
+                                        <button @click.stop="openGoogleMaps(event)" class="bg-blue-50 text-blue-600 py-2 rounded-xl text-sm font-bold">開啟地圖</button>
                                         <button @click.stop="openEditModal(event)" class="bg-gray-50 text-gray-600 py-2 rounded-xl text-sm font-bold">編輯行程</button>
                                     </div>
                                     <button @click.stop="deleteEvent(event.id)" class="w-full text-red-400 text-[10px] py-1">刪除此項目</button>
@@ -374,28 +374,26 @@
                         </div>
                     </div>
                 </main>
-                
                 <button @click="openAddModal" class="absolute bottom-6 right-6 w-14 h-14 bg-blue-600 text-white rounded-full shadow-lg flex items-center justify-center text-2xl z-20 mb-[60px] active:scale-90 transition-transform">
                     <i class="fa-solid fa-plus"></i>
                 </button>
             </div>
 
-            <!-- 預算視圖 -->
+            <!-- 其他視圖內容保持不變 -->
             <div v-show="currentView === 'budget'" class="flex-1 overflow-y-auto p-6 bg-gray-50 fade-in">
                 <h2 class="text-xl font-bold text-gray-800 mb-6 flex items-center"><i class="fa-solid fa-wallet mr-2 text-blue-500"></i> 預算統計</h2>
                 <div class="grid grid-cols-2 gap-4 mb-6">
                     <div class="bg-white p-4 rounded-3xl shadow-sm border border-gray-100">
-                        <p class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">總日圓花費</p>
-                        <p class="text-2xl font-black text-orange-500 mt-1">¥ {{ totalJPY.toLocaleString() }}</p>
+                        <p class="text-[10px] font-bold text-gray-400 uppercase">總日圓花費</p>
+                        <p class="text-2xl font-bold text-orange-500 mt-1">¥ {{ totalJPY.toLocaleString() }}</p>
                     </div>
                     <div class="bg-white p-4 rounded-3xl shadow-sm border border-gray-100">
-                        <p class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">總台幣花費</p>
-                        <p class="text-2xl font-black text-blue-500 mt-1">NT$ {{ totalTWD.toLocaleString() }}</p>
+                        <p class="text-[10px] font-bold text-gray-400 uppercase">總台幣花費</p>
+                        <p class="text-2xl font-bold text-blue-500 mt-1">NT$ {{ totalTWD.toLocaleString() }}</p>
                     </div>
                 </div>
             </div>
 
-            <!-- 準備清單 -->
             <div v-show="currentView === 'checklist'" class="flex-1 overflow-y-auto p-6 bg-gray-50 fade-in">
                 <div class="flex justify-between items-center mb-6">
                     <h2 class="text-xl font-bold text-gray-800 flex items-center"><i class="fa-solid fa-clipboard-check mr-2 text-green-500"></i> 行前準備</h2>
@@ -417,9 +415,9 @@
         </div>
 
         <!-- 底部導覽 -->
-        <nav class="bg-white border-t border-gray-100 flex justify-around items-center h-[70px] shrink-0 z-30 pb-2 shadow-[0_-4px_10px_rgba(0,0,0,0.02)]">
+        <nav class="bg-white border-t border-gray-100 flex justify-around items-center h-[70px] shrink-0 z-30 pb-2">
             <button @click="currentView = 'list'" class="flex flex-col items-center justify-center w-full h-full" :class="currentView === 'list' ? 'text-blue-600' : 'text-gray-300'">
-                <i class="fa-solid fa-calendar-alt text-xl"></i>
+                <i class="fa-solid fa-rectangle-list text-xl"></i>
                 <span class="text-[10px] mt-1 font-bold">行程表</span>
             </button>
             <button @click="currentView = 'budget'" class="flex flex-col items-center justify-center w-full h-full" :class="currentView === 'budget' ? 'text-blue-600' : 'text-gray-300'">
@@ -428,68 +426,40 @@
             </button>
             <button @click="currentView = 'checklist'" class="flex flex-col items-center justify-center w-full h-full" :class="currentView === 'checklist' ? 'text-blue-600' : 'text-gray-300'">
                 <i class="fa-solid fa-list-check text-xl"></i>
-                <span class="text-[10px] mt-1 font-bold">清單</span>
+                <span class="text-[10px] mt-1 font-bold">準備</span>
             </button>
         </nav>
 
-        <!-- 編輯行程彈窗 -->
+        <!-- 彈窗 -->
         <transition name="slide-up">
             <div v-if="showModal" class="fixed inset-0 z-50 flex items-end">
                 <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" @click="closeModal"></div>
-                <div class="bg-white w-full rounded-t-[40px] p-8 relative z-10 h-[88vh] flex flex-col shadow-2xl">
-                    <div class="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-8 shrink-0"></div>
-                    <div class="flex justify-between items-center mb-6">
-                        <h3 class="text-2xl font-black text-gray-800">{{ isEditing ? '修改行程' : '新增行程' }}</h3>
-                        <div class="text-[10px] bg-blue-50 text-blue-600 px-3 py-1 rounded-full font-bold">DAY {{ currentDayIndex + 1 }}</div>
-                    </div>
-                    
-                    <form @submit.prevent="saveEvent" class="space-y-5 overflow-y-auto flex-1 pb-6 no-scrollbar">
-                        <div class="space-y-2">
-                            <label class="text-[10px] font-black text-gray-400 uppercase ml-2 tracking-widest">時間與類別</label>
-                            <div class="grid grid-cols-2 gap-4">
-                                <input v-model="form.time" type="time" required class="w-full bg-gray-50 border-none rounded-2xl px-5 py-4 text-sm font-bold">
-                                <select v-model="form.type" class="w-full bg-gray-50 border-none rounded-2xl px-5 py-4 text-sm font-bold">
-                                    <option value="sight">景點 (📸)</option>
-                                    <option value="food">美食 (🍜)</option>
-                                    <option value="shopping">購物 (🛍️)</option>
-                                    <option value="transport">交通 (🚃)</option>
-                                </select>
-                            </div>
+                <div class="bg-white w-full rounded-t-[32px] p-6 relative z-10 h-[90vh] flex flex-col">
+                    <div class="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6 shrink-0"></div>
+                    <h3 class="text-xl font-bold text-gray-800 mb-4">{{ isEditing ? '編輯行程' : '新增行程' }}</h3>
+                    <form @submit.prevent="saveEvent" class="space-y-4 overflow-y-auto flex-1 pb-6 no-scrollbar">
+                        <div class="grid grid-cols-2 gap-4">
+                            <input v-model="form.time" type="time" required class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold">
+                            <select v-model="form.type" class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm">
+                                <option value="sight">景點 (📸)</option>
+                                <option value="food">美食 (🍜)</option>
+                                <option value="shopping">購物 (🛍️)</option>
+                                <option value="transport">交通 (🚃)</option>
+                            </select>
                         </div>
-
-                        <div class="space-y-2">
-                            <label class="text-[10px] font-black text-gray-400 uppercase ml-2 tracking-widest">地點名稱</label>
-                            <input v-model="form.location" placeholder="例如：心齋橋商店街" required class="w-full bg-gray-50 border-none rounded-2xl px-5 py-4 text-sm font-bold">
+                        <input v-model="form.location" placeholder="輸入地點名稱" required class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold">
+                        <div class="grid grid-cols-2 gap-4">
+                            <input v-model.number="form.cost" type="number" placeholder="預估金額" class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm">
+                            <select v-model="form.currency" class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm">
+                                <option value="JPY">日圓 (¥)</option>
+                                <option value="TWD">台幣 ($)</option>
+                            </select>
                         </div>
-
-                        <!-- 新增 Google Maps 連結欄位 -->
-                        <div class="space-y-2">
-                            <label class="text-[10px] font-black text-gray-400 uppercase ml-2 tracking-widest flex items-center gap-2">
-                                <i class="fa-solid fa-map-location-dot text-blue-500"></i> Google 地圖連結 (選填)
-                            </label>
-                            <input v-model="form.mapUrl" placeholder="貼上 Google Maps 分享連結" class="w-full bg-gray-50 border-none rounded-2xl px-5 py-4 text-xs font-medium text-blue-600">
-                        </div>
-
-                        <div class="space-y-2">
-                            <label class="text-[10px] font-black text-gray-400 uppercase ml-2 tracking-widest">預估預算</label>
-                            <div class="grid grid-cols-2 gap-4">
-                                <input v-model.number="form.cost" type="number" placeholder="金額" class="w-full bg-gray-50 border-none rounded-2xl px-5 py-4 text-sm font-bold">
-                                <select v-model="form.currency" class="w-full bg-gray-50 border-none rounded-2xl px-5 py-4 text-sm font-bold">
-                                    <option value="JPY">日圓 (¥)</option>
-                                    <option value="TWD">台幣 ($)</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <div class="space-y-2">
-                            <label class="text-[10px] font-black text-gray-400 uppercase ml-2 tracking-widest">備註內容</label>
-                            <textarea v-model="form.note" rows="2" placeholder="有什麼要注意的嗎？" class="w-full bg-gray-50 border-none rounded-2xl px-5 py-4 text-sm font-medium"></textarea>
-                        </div>
+                        <textarea v-model="form.note" rows="2" placeholder="備註..." class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm"></textarea>
                     </form>
-                    
                     <div class="pt-4 flex space-x-3 mt-auto">
-                        <button type="button" @click="closeModal" class="flex-1 py-4 bg-gray-100 text-gray-500 rounded-2xl font-black text-sm active:scale-95 transition-transform">取消</button>
-                        <button @click="saveEvent" class="flex-2 py-4 bg-blue-600 text-white rounded-2xl font-black text-sm w-[65%] shadow-lg shadow-blue-100 active:scale-95 transition-transform">儲存並同步</button>
+                        <button type="button" @click="closeModal" class="flex-1 py-4 bg-gray-100 text-gray-600 rounded-2xl font-bold">取消</button>
+                        <button @click="saveEvent" class="flex-2 py-4 bg-blue-600 text-white rounded-2xl font-bold w-[60%] active:bg-blue-700">儲存行程</button>
                     </div>
                 </div>
             </div>

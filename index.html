@@ -20,18 +20,17 @@
     <!-- Firebase SDK (Modular) -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getFirestore, doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getFirestore, doc, onSnapshot, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
         // --- 請在此處替換為你的 Firebase 設定 ---
         const firebaseConfig = {
-			  apiKey: "AIzaSyBj54IMMqDeN_MPz7L-G0i7c_96Rf4Ec6I",
-			  authDomain: "trip-app-f8674.firebaseapp.com",
-			  projectId: "trip-app-f8674",
-			  storageBucket: "trip-app-f8674.firebasestorage.app",
-			  messagingSenderId: "465711624559",
-			  appId: "1:465711624559:web:8ec3d9d96c6b242393b89a",
-			  measurementId: "G-QHHGME5SWX"
+            apiKey: "YOUR_API_KEY",
+            authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+            projectId: "YOUR_PROJECT_ID",
+            storageBucket: "YOUR_PROJECT_ID.appspot.com",
+            messagingSenderId: "YOUR_SENDER_ID",
+            appId: "YOUR_APP_ID"
         };
         // ---------------------------------------
 
@@ -45,6 +44,9 @@
             setup() {
                 const userId = ref(null);
                 const isLoading = ref(true);
+                const isSaving = ref(false); // 用於防止同步循環
+                const localLastUpdated = ref(0); // 紀錄本地最後修改時間
+
                 const mainTitle = ref('我的日本旅行');
                 const isEditingMainTitle = ref(false);
                 const mainTitleInput = ref(null);
@@ -64,19 +66,28 @@
                 const expandedEventId = ref(null);
                 const form = ref({ id: null, time: '09:00', location: '', type: 'sight', note: '', cost: '', currency: 'JPY', mapUrl: '' });
 
+                // 核心：雲端儲存邏輯 (增加防抖與版本標記)
                 const saveToCloud = async () => {
-                    if (!userId.value) return;
+                    if (!userId.value || isLoading.value) return;
+                    
+                    isSaving.value = true;
+                    const timestamp = new Date().getTime();
+                    localLastUpdated.value = timestamp;
+
                     try {
                         const data = {
                             days: JSON.parse(JSON.stringify(days.value)),
                             startDate: startDate.value,
                             mainTitle: mainTitle.value,
                             checklist: checklist.value,
-                            updatedAt: new Date().getTime()
+                            updatedAt: timestamp // 紀錄這個版本的時間戳記
                         };
                         await setDoc(doc(db, "user_trips", userId.value), data);
                     } catch (e) {
                         console.error("儲存失敗: ", e);
+                    } finally {
+                        // 延遲解除鎖定，避免 Firebase 回傳的快照瞬間觸發更新
+                        setTimeout(() => { isSaving.value = false; }, 1000);
                     }
                 };
 
@@ -86,15 +97,22 @@
                     onAuthStateChanged(auth, (user) => {
                         if (user) {
                             userId.value = user.uid;
-                            const unsub = onSnapshot(doc(db, "user_trips", user.uid), (docSnap) => {
+                            onSnapshot(doc(db, "user_trips", user.uid), (docSnap) => {
+                                // 重要：如果目前正在儲存中，或雲端資料版本較舊，則不更新本地資料
+                                if (isSaving.value) return;
+
                                 if (docSnap.exists()) {
                                     const data = docSnap.data();
-                                    days.value = data.days || days.value;
-                                    startDate.value = data.startDate || startDate.value;
-                                    mainTitle.value = data.mainTitle || mainTitle.value;
-                                    checklist.value = data.checklist || checklist.value;
+                                    const cloudUpdatedAt = data.updatedAt || 0;
+
+                                    if (cloudUpdatedAt > localLastUpdated.value) {
+                                        days.value = data.days || days.value;
+                                        startDate.value = data.startDate || startDate.value;
+                                        mainTitle.value = data.mainTitle || mainTitle.value;
+                                        checklist.value = data.checklist || checklist.value;
+                                        localLastUpdated.value = cloudUpdatedAt;
+                                    }
                                 }
-                                // 稍微延遲關閉 loading，確保視覺平順
                                 setTimeout(() => { isLoading.value = false; }, 800);
                             }, (err) => {
                                 console.error("監聽失敗", err);
@@ -104,8 +122,9 @@
                     });
                 });
 
+                // 只有當資料真的改變時才觸發儲存
                 watch([days, mainTitle, startDate, checklist], () => {
-                    if (!isLoading.value) {
+                    if (!isLoading.value && !isSaving.value) {
                         saveToCloud();
                     }
                 }, { deep: true });
@@ -119,7 +138,10 @@
                     });
                 };
 
-                const handleStartDateChange = () => recalculateAllDates();
+                const handleStartDateChange = () => {
+                    recalculateAllDates();
+                };
+
                 const formatDisplayDate = (d) => d ? `${new Date(d).getMonth() + 1}/${new Date(d).getDate()}` : '';
                 
                 const currentDayEvents = computed(() => {
@@ -230,7 +252,6 @@
 
         @keyframes drift {
             0% { transform: translateX(100px); opacity: 0; }
-            50% { opacity: 0.5; }
             100% { transform: translateX(-100px); opacity: 0; }
         }
 
@@ -246,11 +267,18 @@
             50% { opacity: 0.7; transform: scale(0.95); }
         }
 
-        /* 介面細節 */
         .category-dot { transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); cursor: pointer; }
         .check-item-done { text-decoration: line-through; opacity: 0.5; }
         .slide-up-enter-active, .slide-up-leave-active { transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
         .slide-up-enter-from, .slide-up-leave-to { transform: translateY(100%); }
+
+        .start-date-config { 
+            position: relative; overflow: hidden; min-width: 80px; display: flex; 
+            flex-direction: column; align-items: center; justify-content: center; 
+            background-color: #eff6ff; border: 1px solid #dbeafe; border-radius: 16px; 
+            padding: 8px; color: #2563eb; cursor: pointer; 
+        }
+        .date-input-hidden { position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
     </style>
 </head>
 <body>
@@ -263,18 +291,9 @@
             <div v-if="isLoading" class="loading-overlay">
                 <div class="cloud-bg" style="top: 35%; right: 20%; animation-delay: 0s;"><i class="fa-solid fa-cloud"></i></div>
                 <div class="cloud-bg" style="top: 45%; left: 15%; animation-delay: 1.5s;"><i class="fa-solid fa-cloud"></i></div>
-                
-                <div class="plane-box">
-                    <i class="fa-solid fa-plane"></i>
-                </div>
-                
-                <div class="loading-text">
-                    <span class="text-sm">正在同步雲端行程...</span>
-                </div>
-                
-                <div class="absolute bottom-10 text-[10px] opacity-40 uppercase tracking-widest">
-                    Osaka Travel Assistant Pro
-                </div>
+                <div class="plane-box"><i class="fa-solid fa-plane"></i></div>
+                <div class="loading-text"><span class="text-sm">正在同步雲端行程...</span></div>
+                <div class="absolute bottom-10 text-[10px] opacity-40 uppercase tracking-widest">Osaka Travel Assistant Pro</div>
             </div>
         </transition>
         
@@ -359,7 +378,7 @@
                 </button>
             </div>
 
-            <!-- 預算視圖 -->
+            <!-- 其他視圖內容保持不變 -->
             <div v-show="currentView === 'budget'" class="flex-1 overflow-y-auto p-6 bg-gray-50 fade-in">
                 <h2 class="text-xl font-bold text-gray-800 mb-6 flex items-center"><i class="fa-solid fa-wallet mr-2 text-blue-500"></i> 預算統計</h2>
                 <div class="grid grid-cols-2 gap-4 mb-6">
@@ -374,7 +393,6 @@
                 </div>
             </div>
 
-            <!-- 準備清單 -->
             <div v-show="currentView === 'checklist'" class="flex-1 overflow-y-auto p-6 bg-gray-50 fade-in">
                 <div class="flex justify-between items-center mb-6">
                     <h2 class="text-xl font-bold text-gray-800 flex items-center"><i class="fa-solid fa-clipboard-check mr-2 text-green-500"></i> 行前準備</h2>
@@ -436,7 +454,7 @@
                                 <option value="TWD">台幣 ($)</option>
                             </select>
                         </div>
-                        <textarea v-model="form.note" rows="2" placeholder="備註（例如：必買明信片、排隊約30分）" class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm"></textarea>
+                        <textarea v-model="form.note" rows="2" placeholder="備註..." class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm"></textarea>
                     </form>
                     <div class="pt-4 flex space-x-3 mt-auto">
                         <button type="button" @click="closeModal" class="flex-1 py-4 bg-gray-100 text-gray-600 rounded-2xl font-bold">取消</button>

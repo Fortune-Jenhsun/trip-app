@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>自由行小幫手</title>
+    <title>自由行小幫手 - 雲端版</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -17,90 +17,240 @@
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
 
+    <!-- Firebase SDK (Modular) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getFirestore, doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+
+        // --- 請在此處替換為你的 Firebase 設定 ---
+        const firebaseConfig = {
+			  apiKey: "AIzaSyBj54IMMqDeN_MPz7L-G0i7c_96Rf4Ec6I",
+			  authDomain: "trip-app-f8674.firebaseapp.com",
+			  projectId: "trip-app-f8674",
+			  storageBucket: "trip-app-f8674.firebasestorage.app",
+			  messagingSenderId: "465711624559",
+			  appId: "1:465711624559:web:8ec3d9d96c6b242393b89a",
+			  measurementId: "G-QHHGME5SWX"
+        };
+        // ---------------------------------------
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        const { createApp, ref, computed, onMounted, watch, nextTick } = Vue;
+
+        createApp({
+            setup() {
+                const userId = ref(null);
+                const isLoading = ref(true);
+                const mainTitle = ref('我的日本旅行');
+                const isEditingMainTitle = ref(false);
+                const mainTitleInput = ref(null);
+                const startDate = ref(new Date().toISOString().split('T')[0]);
+                const currentView = ref('list');
+                const days = ref([{ date: '', events: [] }]);
+                const checklist = ref([
+                    { text: '護照', done: false },
+                    { text: '機票確認單', done: false },
+                    { text: '日本網卡/WiFi', done: false },
+                    { text: '外幣現金/信用卡', done: false }
+                ]);
+
+                const currentDayIndex = ref(0);
+                const showModal = ref(false);
+                const isEditing = ref(false);
+                const expandedEventId = ref(null);
+                const form = ref({ id: null, time: '09:00', location: '', type: 'sight', note: '', cost: '', currency: 'JPY', mapUrl: '' });
+
+                const saveToCloud = async () => {
+                    if (!userId.value) return;
+                    try {
+                        const data = {
+                            days: JSON.parse(JSON.stringify(days.value)),
+                            startDate: startDate.value,
+                            mainTitle: mainTitle.value,
+                            checklist: checklist.value,
+                            updatedAt: new Date().getTime()
+                        };
+                        await setDoc(doc(db, "user_trips", userId.value), data);
+                    } catch (e) {
+                        console.error("儲存失敗: ", e);
+                    }
+                };
+
+                onMounted(() => {
+                    signInAnonymously(auth).catch(err => console.error("登入失敗", err));
+
+                    onAuthStateChanged(auth, (user) => {
+                        if (user) {
+                            userId.value = user.uid;
+                            const unsub = onSnapshot(doc(db, "user_trips", user.uid), (docSnap) => {
+                                if (docSnap.exists()) {
+                                    const data = docSnap.data();
+                                    days.value = data.days || days.value;
+                                    startDate.value = data.startDate || startDate.value;
+                                    mainTitle.value = data.mainTitle || mainTitle.value;
+                                    checklist.value = data.checklist || checklist.value;
+                                }
+                                // 稍微延遲關閉 loading，確保視覺平順
+                                setTimeout(() => { isLoading.value = false; }, 800);
+                            }, (err) => {
+                                console.error("監聽失敗", err);
+                                isLoading.value = false;
+                            });
+                        }
+                    });
+                });
+
+                watch([days, mainTitle, startDate, checklist], () => {
+                    if (!isLoading.value) {
+                        saveToCloud();
+                    }
+                }, { deep: true });
+
+                const recalculateAllDates = () => {
+                    const start = new Date(startDate.value);
+                    days.value.forEach((day, index) => {
+                        const current = new Date(start);
+                        current.setDate(start.getDate() + index);
+                        day.date = current.toISOString().split('T')[0];
+                    });
+                };
+
+                const handleStartDateChange = () => recalculateAllDates();
+                const formatDisplayDate = (d) => d ? `${new Date(d).getMonth() + 1}/${new Date(d).getDate()}` : '';
+                
+                const currentDayEvents = computed(() => {
+                    const currentDay = days.value[currentDayIndex.value];
+                    if (!currentDay || !currentDay.events) return [];
+                    return [...currentDay.events].sort((a,b) => a.time.localeCompare(b.time));
+                });
+
+                const addDay = () => {
+                    days.value.push({ date: '', events: [] });
+                    recalculateAllDates();
+                    currentDayIndex.value = days.value.length - 1;
+                };
+
+                const getDayTotal = (day, curr) => (day.events || []).reduce((sum, e) => e.currency === curr ? sum + (Number(e.cost) || 0) : sum, 0);
+                const totalJPY = computed(() => days.value.reduce((sum, d) => sum + getDayTotal(d, 'JPY'), 0));
+                const totalTWD = computed(() => days.value.reduce((sum, d) => sum + getDayTotal(d, 'TWD'), 0));
+
+                const toggleCheck = (idx) => checklist.value[idx].done = !checklist.value[idx].done;
+                const addCheckItem = () => {
+                    const text = prompt("輸入準備事項：");
+                    if (text) checklist.value.push({ text, done: false });
+                };
+                const removeCheckItem = (idx) => checklist.value.splice(idx, 1);
+
+                const openAddModal = () => { isEditing.value = false; form.value = { id: Date.now(), time: '09:00', location: '', type: 'sight', note: '', cost: '', currency: 'JPY', mapUrl: '' }; showModal.value = true; };
+                const openEditModal = (ev) => { isEditing.value = true; form.value = { ...ev }; showModal.value = true; };
+                const closeModal = () => showModal.value = false;
+                
+                const saveEvent = () => {
+                    if (!form.value.location) return;
+                    const targetDay = days.value[currentDayIndex.value];
+                    if (!targetDay.events) targetDay.events = [];
+                    if (isEditing.value) {
+                        const idx = targetDay.events.findIndex(e => e.id === form.value.id);
+                        if (idx !== -1) targetDay.events[idx] = { ...form.value };
+                    } else { targetDay.events.push({ ...form.value }); }
+                    closeModal();
+                };
+                
+                const deleteEvent = (id) => { if(confirm('確定刪除此行程？')) days.value[currentDayIndex.value].events = days.value[currentDayIndex.value].events.filter(e => e.id !== id); };
+                const toggleDetail = (id) => expandedEventId.value = expandedEventId.value === id ? null : id;
+                const openGoogleMaps = (e) => window.open(e.mapUrl || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(e.location)}`, '_blank');
+                const editMainTitle = () => { isEditingMainTitle.value = true; nextTick(() => mainTitleInput.value?.focus()); };
+                const saveMainTitle = () => isEditingMainTitle.value = false;
+
+                const getTypeIcon = (t) => {
+                    const icons = { sight: 'fa-camera', food: 'fa-utensils', shopping: 'fa-bag-shopping', transport: 'fa-train' };
+                    return icons[t] || 'fa-location-dot';
+                };
+
+                const getTypeColor = (t) => {
+                    const colors = { sight: 'bg-pink-500', food: 'bg-orange-500', shopping: 'bg-purple-500', transport: 'bg-blue-500' };
+                    return colors[t] || 'bg-gray-400';
+                };
+
+                return {
+                    userId, isLoading, mainTitle, isEditingMainTitle, mainTitleInput, editMainTitle, saveMainTitle,
+                    startDate, handleStartDateChange, days, currentDayIndex, currentDayEvents,
+                    showModal, isEditing, form, expandedEventId, currentView,
+                    checklist, toggleCheck, addCheckItem, removeCheckItem,
+                    totalJPY, totalTWD, getDayTotal,
+                    formatDisplayDate, addDay, openAddModal, openEditModal, closeModal, saveEvent, deleteEvent, toggleDetail, openGoogleMaps, getTypeIcon, getTypeColor
+                };
+            }
+        }).mount('#app');
+    </script>
+
     <style>
-        body {
-            font-family: 'Noto Sans TC', sans-serif;
-            background-color: #f3f4f6;
-            -webkit-tap-highlight-color: transparent;
-            overscroll-behavior-y: none;
-        }
-        
+        body { font-family: 'Noto Sans TC', sans-serif; background-color: #f3f4f6; -webkit-tap-highlight-color: transparent; overscroll-behavior-y: none; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-
-        .app-container {
-            max-width: 480px;
-            margin: 0 auto;
-            background-color: #ffffff;
-            height: 100vh;
-            height: 100dvh;
-            position: relative;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-            box-shadow: 0 0 20px rgba(0,0,0,0.1);
-        }
-
-        .timeline-line {
-            position: absolute;
-            left: 24px;
-            top: 20px;
-            bottom: -20px;
-            width: 2px;
-            background-color: #f1f5f9;
-            z-index: 0;
-        }
-
-        .slide-up-enter-active, .slide-up-leave-active {
-            transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-        }
-        .slide-up-enter-from, .slide-up-leave-to {
-            transform: translateY(100%);
-        }
-
+        .app-container { max-width: 480px; margin: 0 auto; background-color: #ffffff; height: 100dvh; position: relative; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 0 20px rgba(0,0,0,0.1); }
+        .timeline-line { position: absolute; left: 24px; top: 20px; bottom: -20px; width: 2px; background-color: #f1f5f9; z-index: 0; }
+        
         .fade-in { animation: fadeIn 0.3s ease-in; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-
-        .title-input {
-            border: none;
-            background: #f8fafc;
-            border-bottom: 2px solid #3b82f6;
-            padding: 2px 4px;
-            border-radius: 4px;
-            outline: none;
-            width: 100%;
-        }
-
-        .start-date-config {
-            position: relative;
-            overflow: hidden;
-            min-width: 80px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            background-color: #eff6ff;
-            border: 1px solid #dbeafe;
-            border-radius: 16px;
-            padding: 8px;
-            color: #2563eb;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-
-        .date-input-hidden {
-            position: absolute;
-            top: 0; left: 0; width: 100%; height: 100%;
-            opacity: 0; cursor: pointer;
-        }
-
-        .category-dot { 
-            transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); 
-            cursor: pointer; 
-        }
-        .category-dot:active { transform: scale(0.8); }
         
+        /* 載入遮罩優化版 */
+        .loading-overlay { 
+            position: absolute; 
+            inset: 0; 
+            background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); 
+            z-index: 100; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            justify-content: center;
+            color: white;
+        }
+
+        .plane-box {
+            position: relative;
+            font-size: 3rem;
+            animation: flight 2s infinite ease-in-out;
+        }
+
+        .cloud-bg {
+            position: absolute;
+            font-size: 1.5rem;
+            opacity: 0.4;
+            animation: drift 3s infinite linear;
+        }
+
+        @keyframes flight {
+            0%, 100% { transform: translateY(0) rotate(5deg); }
+            50% { transform: translateY(-15px) rotate(-5deg); }
+        }
+
+        @keyframes drift {
+            0% { transform: translateX(100px); opacity: 0; }
+            50% { opacity: 0.5; }
+            100% { transform: translateX(-100px); opacity: 0; }
+        }
+
+        .loading-text {
+            margin-top: 2rem;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.7; transform: scale(0.95); }
+        }
+
+        /* 介面細節 */
+        .category-dot { transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); cursor: pointer; }
         .check-item-done { text-decoration: line-through; opacity: 0.5; }
+        .slide-up-enter-active, .slide-up-leave-active { transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+        .slide-up-enter-from, .slide-up-leave-to { transform: translateY(100%); }
     </style>
 </head>
 <body>
@@ -108,36 +258,48 @@
 <div id="app">
     <div class="app-container">
         
+        <!-- 質感雲端同步載入中狀態 -->
+        <transition name="fade">
+            <div v-if="isLoading" class="loading-overlay">
+                <div class="cloud-bg" style="top: 35%; right: 20%; animation-delay: 0s;"><i class="fa-solid fa-cloud"></i></div>
+                <div class="cloud-bg" style="top: 45%; left: 15%; animation-delay: 1.5s;"><i class="fa-solid fa-cloud"></i></div>
+                
+                <div class="plane-box">
+                    <i class="fa-solid fa-plane"></i>
+                </div>
+                
+                <div class="loading-text">
+                    <span class="text-sm">正在同步雲端行程...</span>
+                </div>
+                
+                <div class="absolute bottom-10 text-[10px] opacity-40 uppercase tracking-widest">
+                    Osaka Travel Assistant Pro
+                </div>
+            </div>
+        </transition>
+        
         <!-- Header -->
-        <header class="bg-white px-4 py-4 border-b border-gray-100 flex items-center justify-between shrink-0 z-20 shadow-sm">
+        <header class="bg-white px-4 py-4 border-b border-gray-100 flex items-center justify-between shrink-0 z-20">
             <div class="flex-1">
                 <div v-if="isEditingMainTitle" class="flex items-center gap-2">
-                    <input 
-                        ref="mainTitleInput"
-                        v-model="mainTitle" 
-                        @blur="saveMainTitle"
-                        @keyup.enter="saveMainTitle"
-                        class="title-input text-xl font-bold text-gray-800"
-                    >
+                    <input ref="mainTitleInput" v-model="mainTitle" @blur="saveMainTitle" @keyup.enter="saveMainTitle" class="w-full bg-blue-50 border-b-2 border-blue-500 outline-none text-xl font-bold p-1 rounded">
                 </div>
-                <h1 v-else @click="editMainTitle" class="text-xl font-bold text-gray-800 tracking-wide flex items-center cursor-pointer hover:text-blue-600 transition-colors">
-                    {{ mainTitle }}
-                    <i class="fa-solid fa-pen text-[10px] ml-2 text-gray-300"></i>
+                <h1 v-else @click="editMainTitle" class="text-xl font-bold text-gray-800 tracking-wide flex items-center cursor-pointer">
+                    {{ mainTitle }} <i class="fa-solid fa-pen text-[10px] ml-2 text-gray-300"></i>
                 </h1>
             </div>
-            <div class="flex gap-2">
-                <button @click="resetAll" class="text-[10px] bg-red-50 text-red-500 px-3 py-1.5 rounded-full font-bold active:scale-95 transition-transform">
-                    重設
-                </button>
+            <div class="flex items-center gap-2">
+                <div class="text-[9px] text-green-500 font-bold bg-green-50 px-2 py-1 rounded-full flex items-center gap-1 shadow-sm">
+                    <i class="fa-solid fa-cloud"></i> 雲端同步中
+                </div>
             </div>
         </header>
 
         <!-- Main Content -->
         <div class="flex-1 relative overflow-hidden flex flex-col">
             
-            <!-- 視圖 1: 行程列表 -->
+            <!-- 行程列表 -->
             <div v-show="currentView === 'list'" class="flex-1 flex flex-col h-full fade-in">
-                <!-- 日期導覽 -->
                 <div class="bg-white shrink-0 px-2 py-4 z-10 overflow-x-auto no-scrollbar whitespace-nowrap border-b border-gray-100">
                     <div class="flex space-x-3 px-2 items-stretch">
                         <div class="start-date-config shadow-sm">
@@ -145,82 +307,61 @@
                             <span class="text-[10px] font-bold">設定首日</span>
                             <input type="date" v-model="startDate" @change="handleStartDateChange" class="date-input-hidden">
                         </div>
-
-                        <div 
-                            v-for="(day, index) in days" :key="index"
-                            @click="currentDayIndex = index"
-                            class="px-3 py-2 rounded-2xl transition-all duration-200 flex-shrink-0 flex flex-col items-center min-w-[90px] relative cursor-pointer"
-                            :class="currentDayIndex === index ? 'bg-blue-600 text-white shadow-lg transform scale-105' : 'bg-gray-50 text-gray-500'"
-                        >
+                        <div v-for="(day, index) in days" :key="index" @click="currentDayIndex = index"
+                            class="px-3 py-2 rounded-2xl flex-shrink-0 flex flex-col items-center min-w-[90px] cursor-pointer transition-all"
+                            :class="currentDayIndex === index ? 'bg-blue-600 text-white shadow-lg scale-105' : 'bg-gray-50 text-gray-400'">
                             <span class="text-[9px] font-bold opacity-80 mb-0.5">DAY {{ index + 1 }}</span>
                             <span class="text-[11px] font-bold">{{ formatDisplayDate(day.date) }}</span>
                         </div>
-
-                        <button @click="addDay" class="px-5 py-2 rounded-2xl bg-gray-50 text-blue-500 border border-dashed border-blue-200 flex flex-col items-center justify-center min-w-[75px]">
+                        <button @click="addDay" class="px-5 py-2 rounded-2xl bg-gray-50 text-blue-500 border border-dashed border-blue-200 min-w-[75px]">
                             <i class="fa-solid fa-plus text-xs"></i>
-                            <span class="text-[10px] font-bold mt-1">新增天數</span>
                         </button>
                     </div>
                 </div>
 
-                <!-- 列表內容 -->
                 <main class="flex-1 overflow-y-auto no-scrollbar relative p-4 bg-gray-50 pb-24">
                     <div v-if="currentDayEvents.length === 0" class="flex flex-col items-center justify-center h-64 text-gray-400">
-                        <div class="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mb-4">
-                            <i class="fa-solid fa-map-location-dot text-2xl text-gray-400"></i>
-                        </div>
-                        <p>這天還沒有行程安排</p>
-                        <button @click="openAddModal" class="mt-4 text-blue-500 font-bold text-sm">+ 點擊新增行程</button>
+                        <i class="fa-solid fa-map-location-dot text-3xl mb-4 opacity-20"></i>
+                        <p class="text-sm font-medium">今天還沒安排行程</p>
                     </div>
-
                     <div v-else class="space-y-4 relative mt-2">
                         <div class="timeline-line"></div>
                         <div v-for="(event) in currentDayEvents" :key="event.id" class="relative pl-14">
-                            <!-- 左側時間與類別圖示 -->
                             <div class="absolute left-0 top-0 flex flex-col items-center w-12 z-10">
                                 <span class="text-[10px] font-bold text-gray-400 mb-1">{{ event.time }}</span>
                                 <div @click.stop="toggleDetail(event.id)" 
-                                     class="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm shadow-md border-4 border-white category-dot hover:brightness-110" 
+                                     class="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm shadow-md border-4 border-white category-dot" 
                                      :class="getTypeColor(event.type)">
                                     <i :class="['fa-solid', getTypeIcon(event.type)]"></i>
                                 </div>
                             </div>
-
-                            <!-- 右側行程卡片 -->
-                            <div @click="toggleDetail(event.id)" class="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 active:scale-[0.98] transition-transform duration-100 cursor-pointer">
-                                <div class="flex justify-between items-start">
-                                    <h3 class="font-bold text-gray-800 text-lg leading-tight">{{ event.location }}</h3>
-                                </div>
-                                
+                            <div @click="toggleDetail(event.id)" class="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 cursor-pointer active:scale-[0.98] transition-transform">
+                                <h3 class="font-bold text-gray-800 text-lg leading-tight">{{ event.location }}</h3>
                                 <div class="flex items-center justify-between mt-1.5">
-                                    <p class="text-gray-600 text-xs line-clamp-2 leading-relaxed">{{ event.note || '尚無備註' }}</p>
-                                    <span v-if="event.cost" class="text-[10px] font-bold bg-yellow-50 text-yellow-700 px-2 py-0.5 rounded-full ml-auto shrink-0 self-start">
+                                    <p class="text-gray-600 text-xs line-clamp-2">{{ event.note || '尚無備註' }}</p>
+                                    <span v-if="event.cost" class="text-[10px] font-bold bg-yellow-50 text-yellow-700 px-2 py-0.5 rounded-full ml-auto">
                                         {{ event.currency === 'TWD' ? 'NT$' : '¥' }}{{ event.cost }}
                                     </span>
                                 </div>
-
                                 <div v-if="expandedEventId === event.id" class="mt-4 pt-3 border-t border-gray-100 fade-in">
                                     <div class="grid grid-cols-2 gap-2 mb-2">
-                                        <button @click.stop="openGoogleMaps(event)" class="bg-blue-50 text-blue-600 py-2 rounded-xl text-sm font-medium">地圖</button>
-                                        <button @click.stop="openEditModal(event)" class="bg-gray-50 text-gray-600 py-2 rounded-xl text-sm font-medium">編輯</button>
+                                        <button @click.stop="openGoogleMaps(event)" class="bg-blue-50 text-blue-600 py-2 rounded-xl text-sm font-bold">開啟地圖</button>
+                                        <button @click.stop="openEditModal(event)" class="bg-gray-50 text-gray-600 py-2 rounded-xl text-sm font-bold">編輯行程</button>
                                     </div>
-                                    <button @click.stop="deleteEvent(event.id)" class="w-full text-red-400 text-xs py-1">刪除此項目</button>
+                                    <button @click.stop="deleteEvent(event.id)" class="w-full text-red-400 text-[10px] py-1">刪除此項目</button>
                                 </div>
                             </div>
                         </div>
                     </div>
                 </main>
-                
-                <button @click="openAddModal" class="absolute bottom-6 right-6 w-14 h-14 bg-blue-600 text-white rounded-full shadow-lg shadow-blue-600/30 flex items-center justify-center text-2xl z-20 mb-[60px]">
+                <button @click="openAddModal" class="absolute bottom-6 right-6 w-14 h-14 bg-blue-600 text-white rounded-full shadow-lg flex items-center justify-center text-2xl z-20 mb-[60px] active:scale-90 transition-transform">
                     <i class="fa-solid fa-plus"></i>
                 </button>
             </div>
 
-            <!-- 視圖 2: 預算統計 -->
+            <!-- 預算視圖 -->
             <div v-show="currentView === 'budget'" class="flex-1 overflow-y-auto p-6 bg-gray-50 fade-in">
-                <h2 class="text-xl font-bold text-gray-800 mb-6 flex items-center">
-                    <i class="fa-solid fa-wallet mr-2 text-blue-500"></i> 預算統計
-                </h2>
+                <h2 class="text-xl font-bold text-gray-800 mb-6 flex items-center"><i class="fa-solid fa-wallet mr-2 text-blue-500"></i> 預算統計</h2>
                 <div class="grid grid-cols-2 gap-4 mb-6">
                     <div class="bg-white p-4 rounded-3xl shadow-sm border border-gray-100">
                         <p class="text-[10px] font-bold text-gray-400 uppercase">總日圓花費</p>
@@ -231,49 +372,30 @@
                         <p class="text-2xl font-bold text-blue-500 mt-1">NT$ {{ totalTWD.toLocaleString() }}</p>
                     </div>
                 </div>
-                <div class="space-y-3">
-                    <h3 class="text-sm font-bold text-gray-500 px-1">每日花費清單</h3>
-                    <div v-for="(day, idx) in days" :key="idx" class="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
-                        <div class="flex justify-between items-center">
-                            <span class="font-bold text-gray-700">Day {{ idx + 1 }} ({{ formatDisplayDate(day.date) }})</span>
-                            <div class="text-right">
-                                <p v-if="getDayTotal(day, 'JPY') > 0" class="text-xs font-bold text-orange-500">¥ {{ getDayTotal(day, 'JPY').toLocaleString() }}</p>
-                                <p v-if="getDayTotal(day, 'TWD') > 0" class="text-xs font-bold text-blue-500">NT$ {{ getDayTotal(day, 'TWD').toLocaleString() }}</p>
-                                <p v-if="getDayTotal(day, 'JPY') === 0 && getDayTotal(day, 'TWD') === 0" class="text-xs text-gray-300">無紀錄</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
             </div>
 
-            <!-- 視圖 3: 準備清單 -->
+            <!-- 準備清單 -->
             <div v-show="currentView === 'checklist'" class="flex-1 overflow-y-auto p-6 bg-gray-50 fade-in">
                 <div class="flex justify-between items-center mb-6">
-                    <h2 class="text-xl font-bold text-gray-800 flex items-center">
-                        <i class="fa-solid fa-clipboard-check mr-2 text-green-500"></i> 行前準備
-                    </h2>
+                    <h2 class="text-xl font-bold text-gray-800 flex items-center"><i class="fa-solid fa-clipboard-check mr-2 text-green-500"></i> 行前準備</h2>
                     <button @click="addCheckItem" class="text-blue-600 text-sm font-bold">+ 新增項目</button>
                 </div>
                 <div class="space-y-3">
-                    <div v-for="(item, idx) in checklist" :key="idx" 
-                         @click="toggleCheck(idx)"
-                         class="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 flex items-center justify-between cursor-pointer active:bg-gray-50">
+                    <div v-for="(item, idx) in checklist" :key="idx" @click="toggleCheck(idx)"
+                         class="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 flex items-center justify-between cursor-pointer">
                         <div class="flex items-center gap-3">
-                            <div class="w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors"
-                                 :class="item.done ? 'bg-green-500 border-green-500 text-white' : 'border-gray-200'">
+                            <div class="w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors" :class="item.done ? 'bg-green-500 border-green-500 text-white' : 'border-gray-200'">
                                 <i v-if="item.done" class="fa-solid fa-check text-[10px]"></i>
                             </div>
                             <span class="font-medium text-gray-700" :class="{'check-item-done': item.done}">{{ item.text }}</span>
                         </div>
-                        <button @click.stop="removeCheckItem(idx)" class="text-gray-300 hover:text-red-400">
-                            <i class="fa-solid fa-xmark"></i>
-                        </button>
+                        <button @click.stop="removeCheckItem(idx)" class="text-gray-300 hover:text-red-500"><i class="fa-solid fa-xmark"></i></button>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- 底部導航 -->
+        <!-- 底部導覽 -->
         <nav class="bg-white border-t border-gray-100 flex justify-around items-center h-[70px] shrink-0 z-30 pb-2">
             <button @click="currentView = 'list'" class="flex flex-col items-center justify-center w-full h-full" :class="currentView === 'list' ? 'text-blue-600' : 'text-gray-300'">
                 <i class="fa-solid fa-rectangle-list text-xl"></i>
@@ -298,49 +420,27 @@
                     <h3 class="text-xl font-bold text-gray-800 mb-4">{{ isEditing ? '編輯行程' : '新增行程' }}</h3>
                     <form @submit.prevent="saveEvent" class="space-y-4 overflow-y-auto flex-1 pb-6 no-scrollbar">
                         <div class="grid grid-cols-2 gap-4">
-                            <div>
-                                <label class="block text-xs font-bold text-gray-400 mb-2 uppercase">抵達時間</label>
-                                <input v-model="form.time" type="time" required class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm">
-                            </div>
-                            <div>
-                                <label class="block text-xs font-bold text-gray-400 mb-2 uppercase">類別</label>
-                                <select v-model="form.type" class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm">
-                                    <option value="sight">景點 (📸)</option>
-                                    <option value="food">美食 (🍜)</option>
-                                    <option value="shopping">購物 (🛍️)</option>
-                                    <option value="transport">交通 (🚃)</option>
-                                </select>
-                            </div>
+                            <input v-model="form.time" type="time" required class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold">
+                            <select v-model="form.type" class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm">
+                                <option value="sight">景點 (📸)</option>
+                                <option value="food">美食 (🍜)</option>
+                                <option value="shopping">購物 (🛍️)</option>
+                                <option value="transport">交通 (🚃)</option>
+                            </select>
                         </div>
-                        <div>
-                            <label class="block text-xs font-bold text-gray-400 mb-2 uppercase">地點名稱</label>
-                            <input v-model="form.location" placeholder="地點名稱" required class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm">
-                        </div>
-                        <div>
-                            <label class="block text-xs font-bold text-gray-400 mb-2 uppercase">Google 地圖連結</label>
-                            <input v-model="form.mapUrl" placeholder="https://..." class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm">
-                        </div>
+                        <input v-model="form.location" placeholder="輸入地點名稱" required class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold">
                         <div class="grid grid-cols-2 gap-4">
-                            <div>
-                                <label class="block text-xs font-bold text-gray-400 mb-2 uppercase">預算金額</label>
-                                <input v-model.number="form.cost" type="number" placeholder="0" class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm">
-                            </div>
-                            <div>
-                                <label class="block text-xs font-bold text-gray-400 mb-2 uppercase">幣別</label>
-                                <select v-model="form.currency" class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm">
-                                    <option value="JPY">日圓 (¥)</option>
-                                    <option value="TWD">台幣 ($)</option>
-                                </select>
-                            </div>
+                            <input v-model.number="form.cost" type="number" placeholder="預估金額" class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm">
+                            <select v-model="form.currency" class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm">
+                                <option value="JPY">日圓 (¥)</option>
+                                <option value="TWD">台幣 ($)</option>
+                            </select>
                         </div>
-                        <div>
-                            <label class="block text-xs font-bold text-gray-400 mb-2 uppercase">筆記</label>
-                            <textarea v-model="form.note" rows="2" placeholder="行程備註..." class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm"></textarea>
-                        </div>
+                        <textarea v-model="form.note" rows="2" placeholder="備註（例如：必買明信片、排隊約30分）" class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm"></textarea>
                     </form>
                     <div class="pt-4 flex space-x-3 mt-auto">
                         <button type="button" @click="closeModal" class="flex-1 py-4 bg-gray-100 text-gray-600 rounded-2xl font-bold">取消</button>
-                        <button @click="saveEvent" class="flex-2 py-4 bg-blue-600 text-white rounded-2xl font-bold w-[60%]">儲存</button>
+                        <button @click="saveEvent" class="flex-2 py-4 bg-blue-600 text-white rounded-2xl font-bold w-[60%] active:bg-blue-700">儲存行程</button>
                     </div>
                 </div>
             </div>
@@ -349,157 +449,5 @@
     </div>
 </div>
 
-<script>
-    const { createApp, ref, computed, onMounted, watch, nextTick } = Vue;
-
-    createApp({
-        setup() {
-            const mainTitle = ref('我的日本旅行');
-            const isEditingMainTitle = ref(false);
-            const mainTitleInput = ref(null);
-            const startDate = ref(new Date().toISOString().split('T')[0]);
-            const currentView = ref('list');
-            
-            const days = ref([{ date: '', events: [] }]);
-            const checklist = ref([
-                { text: '護照', done: false },
-                { text: '機票確認單', done: false },
-                { text: '日本網卡/WiFi', done: false },
-                { text: '外幣現金/信用卡', done: false }
-            ]);
-
-            const currentDayIndex = ref(0);
-            const showModal = ref(false);
-            const isEditing = ref(false);
-            const expandedEventId = ref(null);
-            const form = ref({ id: null, time: '09:00', location: '', type: 'sight', note: '', cost: '', currency: 'JPY', mapUrl: '' });
-
-            const saveToLocal = () => {
-                const data = {
-                    days: JSON.parse(JSON.stringify(days.value)),
-                    startDate: startDate.value,
-                    mainTitle: mainTitle.value,
-                    checklist: checklist.value
-                };
-                localStorage.setItem('osaka_trip_data_v2', JSON.stringify(data));
-            };
-
-            const loadFromLocal = () => {
-                const saved = localStorage.getItem('osaka_trip_data_v2');
-                if (saved) {
-                    const data = JSON.parse(saved);
-                    days.value = data.days || days.value;
-                    startDate.value = data.startDate || startDate.value;
-                    mainTitle.value = data.mainTitle || mainTitle.value;
-                    checklist.value = data.checklist || checklist.value;
-                    recalculateAllDates();
-                }
-            };
-
-            const resetAll = () => {
-                if(confirm('確定要清除所有行程嗎？此動作無法復原。')) {
-                    localStorage.removeItem('osaka_trip_data_v2');
-                    location.reload();
-                }
-            };
-
-            watch([days, mainTitle, startDate, checklist], () => {
-                saveToLocal();
-            }, { deep: true });
-
-            const recalculateAllDates = () => {
-                const start = new Date(startDate.value);
-                days.value.forEach((day, index) => {
-                    const current = new Date(start);
-                    current.setDate(start.getDate() + index);
-                    day.date = current.toISOString().split('T')[0];
-                });
-            };
-
-            const handleStartDateChange = () => recalculateAllDates();
-            const formatDisplayDate = (d) => d ? `${new Date(d).getMonth() + 1}/${new Date(d).getDate()}` : '';
-            
-            const currentDayEvents = computed(() => {
-                const currentDay = days.value[currentDayIndex.value];
-                if (!currentDay || !currentDay.events) return [];
-                return [...currentDay.events].sort((a,b) => a.time.localeCompare(b.time));
-            });
-
-            const addDay = () => {
-                days.value.push({ date: '', events: [] });
-                recalculateAllDates();
-                currentDayIndex.value = days.value.length - 1;
-            };
-
-            const getDayTotal = (day, curr) => (day.events || []).reduce((sum, e) => e.currency === curr ? sum + (Number(e.cost) || 0) : sum, 0);
-            const totalJPY = computed(() => days.value.reduce((sum, d) => sum + getDayTotal(d, 'JPY'), 0));
-            const totalTWD = computed(() => days.value.reduce((sum, d) => sum + getDayTotal(d, 'TWD'), 0));
-
-            const toggleCheck = (idx) => checklist.value[idx].done = !checklist.value[idx].done;
-            const addCheckItem = () => {
-                const text = prompt("輸入準備事項：");
-                if (text) checklist.value.push({ text, done: false });
-            };
-            const removeCheckItem = (idx) => checklist.value.splice(idx, 1);
-
-            const openAddModal = () => { isEditing.value = false; form.value = { id: Date.now(), time: '09:00', location: '', type: 'sight', note: '', cost: '', currency: 'JPY', mapUrl: '' }; showModal.value = true; };
-            const openEditModal = (ev) => { isEditing.value = true; form.value = { ...ev }; showModal.value = true; };
-            const closeModal = () => showModal.value = false;
-            
-            const saveEvent = () => {
-                if (!form.value.location) return;
-                const targetDay = days.value[currentDayIndex.value];
-                if (!targetDay.events) targetDay.events = [];
-                if (isEditing.value) {
-                    const idx = targetDay.events.findIndex(e => e.id === form.value.id);
-                    if (idx !== -1) targetDay.events[idx] = { ...form.value };
-                } else { targetDay.events.push({ ...form.value }); }
-                closeModal();
-            };
-            
-            const deleteEvent = (id) => { if(confirm('確定刪除此行程？')) days.value[currentDayIndex.value].events = days.value[currentDayIndex.value].events.filter(e => e.id !== id); };
-            const toggleDetail = (id) => expandedEventId.value = expandedEventId.value === id ? null : id;
-            const openGoogleMaps = (e) => window.open(e.mapUrl || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(e.location)}`, '_blank');
-            const editMainTitle = () => { isEditingMainTitle.value = true; nextTick(() => mainTitleInput.value?.focus()); };
-            const saveMainTitle = () => isEditingMainTitle.value = false;
-
-            // 類別 Icon 配置
-            const getTypeIcon = (t) => {
-                const icons = { 
-                    sight: 'fa-camera', 
-                    food: 'fa-utensils', 
-                    shopping: 'fa-bag-shopping', 
-                    transport: 'fa-train' 
-                };
-                return icons[t] || 'fa-location-dot';
-            };
-
-            // 類別顏色配置
-            const getTypeColor = (t) => {
-                const colors = { 
-                    sight: 'bg-pink-500', 
-                    food: 'bg-orange-500', 
-                    shopping: 'bg-purple-500', 
-                    transport: 'bg-blue-500' 
-                };
-                return colors[t] || 'bg-gray-400';
-            };
-
-            onMounted(() => {
-                loadFromLocal();
-                recalculateAllDates();
-            });
-
-            return {
-                mainTitle, isEditingMainTitle, mainTitleInput, editMainTitle, saveMainTitle,
-                startDate, handleStartDateChange, days, currentDayIndex, currentDayEvents,
-                showModal, isEditing, form, expandedEventId, currentView,
-                checklist, toggleCheck, addCheckItem, removeCheckItem,
-                totalJPY, totalTWD, getDayTotal, resetAll,
-                formatDisplayDate, addDay, openAddModal, openEditModal, closeModal, saveEvent, deleteEvent, toggleDetail, openGoogleMaps, getTypeIcon, getTypeColor
-            };
-        }
-    }).mount('#app');
-</script>
 </body>
 </html>

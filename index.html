@@ -3,161 +3,307 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>大阪自由行助手 Pro - 雲端版</title>
+    <title>大阪自由行助手 Pro</title>
     
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Vue 3 -->
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    
+    <!-- FontAwesome Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
 
-    <!-- Firebase SDK -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-app.js";
-        import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-auth.js";
-
-        window.firebaseModules = { initializeApp, getFirestore, doc, setDoc, onSnapshot, getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken };
-    </script>
+    <!-- Leaflet CSS (Map) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
     <style>
-        body { font-family: 'Noto Sans TC', sans-serif; background-color: #f3f4f6; -webkit-tap-highlight-color: transparent; overscroll-behavior-y: none; }
-        .app-container { max-width: 480px; margin: 0 auto; background-color: #ffffff; height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 0 20px rgba(0,0,0,0.1); }
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            background-color: #f3f4f6;
+            -webkit-tap-highlight-color: transparent;
+            overscroll-behavior-y: none;
+        }
+        
         .no-scrollbar::-webkit-scrollbar { display: none; }
-        .timeline-line { position: absolute; left: 24px; top: 20px; bottom: -20px; width: 2px; background-color: #f1f5f9; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        .app-container {
+            max-width: 480px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            height: 100vh;
+            height: 100dvh;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+        }
+
+        .timeline-line {
+            position: absolute;
+            left: 24px;
+            top: 20px;
+            bottom: -20px;
+            width: 2px;
+            background-color: #f1f5f9;
+            z-index: 0;
+        }
+
+        .slide-up-enter-active, .slide-up-leave-active {
+            transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .slide-up-enter-from, .slide-up-leave-to {
+            transform: translateY(100%);
+        }
+
+        .fade-in { animation: fadeIn 0.3s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        #map { height: 100%; width: 100%; z-index: 0; }
+        .leaflet-control-attribution { display: none; }
+
+        .title-input {
+            border: none;
+            background: #f8fafc;
+            border-bottom: 2px solid #3b82f6;
+            padding: 2px 4px;
+            border-radius: 4px;
+            outline: none;
+            width: 100%;
+        }
+
+        .start-date-config {
+            position: relative;
+            overflow: hidden;
+            min-width: 80px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background-color: #eff6ff;
+            border: 1px solid #dbeafe;
+            border-radius: 16px;
+            padding: 8px;
+            color: #2563eb;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
         
-        .slide-up-enter-active, .slide-up-leave-active { transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
-        .slide-up-enter-from, .slide-up-leave-to { transform: translateY(100%); }
+        .start-date-config:active {
+            background-color: #dbeafe;
+        }
+
+        .date-input-hidden {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            cursor: pointer;
+        }
+
+        .category-dot {
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
         
-        .loading-overlay { position: fixed; inset: 0; background: rgba(255,255,255,0.9); z-index: 100; display: flex; flex-direction: column; items: center; justify-content: center; }
-        #import-file { display: none; }
-        
-        /* 避免 iOS input 放大 */
-        input, select, textarea { font-size: 16px !important; }
+        .category-dot:active {
+            transform: scale(0.9);
+        }
+
+        /* 隱藏的檔案輸入框 */
+        #import-file {
+            display: none;
+        }
     </style>
 </head>
 <body>
 
 <div id="app">
-    <!-- 雲端同步載入中 -->
-    <div v-if="isLoading" class="loading-overlay">
-        <div class="animate-spin rounded-full h-12 w-12 border-4 border-blue-100 border-t-blue-600 mb-4 mx-auto"></div>
-        <p class="text-blue-600 font-bold text-center px-4">正在同步雲端行程...</p>
-    </div>
-
     <div class="app-container">
+        
         <!-- Header -->
-        <header class="bg-white px-4 py-4 border-b border-gray-100 shrink-0 z-20 shadow-sm">
-            <div class="flex items-center justify-between">
-                <div class="flex-1">
-                    <h1 @click="editMainTitle" class="text-xl font-bold text-gray-800 flex items-center cursor-pointer group">
-                        {{ mainTitle }}
-                        <i class="fa-solid fa-pen text-[10px] ml-2 text-gray-300 group-hover:text-blue-400"></i>
-                    </h1>
-                    <p class="text-[9px] text-gray-400 font-mono mt-1 flex items-center">
-                        <i class="fa-solid fa-cloud-arrow-up mr-1 text-green-400"></i>
-                        同步 ID: {{ userId }}
-                    </p>
+        <header class="bg-white px-4 py-4 border-b border-gray-100 flex items-center justify-between shrink-0 z-20 shadow-sm">
+            <div class="flex-1 mr-4">
+                <div v-if="isEditingMainTitle" class="flex items-center gap-2">
+                    <input 
+                        ref="mainTitleInput"
+                        v-model="mainTitle" 
+                        @blur="saveMainTitle"
+                        @keyup.enter="saveMainTitle"
+                        class="title-input text-xl font-bold text-gray-800"
+                    >
                 </div>
-                
-                <div class="flex space-x-1">
-                    <button @click="triggerImport" class="text-gray-400 p-2 hover:text-blue-500"><i class="fa-solid fa-file-import"></i></button>
-                    <button @click="exportData" class="text-gray-400 p-2 hover:text-blue-500"><i class="fa-solid fa-file-export"></i></button>
-                    <button @click="resetData" class="text-gray-200 p-2 hover:text-red-400"><i class="fa-solid fa-rotate-right"></i></button>
-                </div>
+                <h1 v-else @click="editMainTitle" class="text-xl font-bold text-gray-800 tracking-wide flex items-center cursor-pointer hover:text-blue-600 transition-colors">
+                    {{ mainTitle }}
+                    <i class="fa-solid fa-pen text-[10px] ml-2 text-gray-300"></i>
+                </h1>
             </div>
-            <input type="file" id="import-file" accept=".json" @change="handleImport">
+            
+            <!-- 右上角功能按鈕區 -->
+            <div class="flex space-x-1 shrink-0">
+                <!-- 匯入按鈕 -->
+                <button @click="triggerImport" class="text-gray-500 hover:text-blue-600 text-sm p-2" title="匯入 JSON 檔案">
+                    <i class="fa-solid fa-file-import"></i>
+                </button>
+                <input type="file" id="import-file" accept=".json" @change="handleImport">
+
+                <!-- 匯出按鈕 -->
+                <button @click="exportData" class="text-gray-500 hover:text-blue-600 text-sm p-2" title="匯出為 JSON 檔案">
+                    <i class="fa-solid fa-file-export"></i>
+                </button>
+
+                <!-- 重置按鈕 -->
+                <button @click="resetData" class="text-gray-400 hover:text-red-500 text-sm p-2" title="清除所有本地資料">
+                    <i class="fa-solid fa-rotate-right"></i>
+                </button>
+            </div>
         </header>
 
-        <!-- Content -->
-        <div class="flex-1 relative overflow-hidden flex flex-col bg-gray-50">
-            <!-- 日期導覽 -->
-            <div class="bg-white px-2 py-4 border-b border-gray-100 overflow-x-auto no-scrollbar whitespace-nowrap">
-                <div class="flex space-x-3 px-2">
-                    <div class="relative min-w-[80px] flex flex-col items-center justify-center bg-blue-50 border border-blue-100 rounded-2xl p-2 text-blue-600">
-                        <i class="fa-solid fa-calendar-day text-xs mb-1"></i>
-                        <span class="text-[10px] font-bold">出發日期</span>
-                        <input type="date" v-model="startDate" @change="handleDateChange" class="absolute inset-0 opacity-0 cursor-pointer">
+        <!-- Main Content -->
+        <div class="flex-1 relative overflow-hidden flex flex-col">
+            
+            <!-- 行程列表 -->
+            <div v-show="currentView === 'list'" class="flex-1 flex flex-col h-full">
+                <!-- 日期導覽 -->
+                <div class="bg-white shrink-0 px-2 py-4 z-10 overflow-x-auto no-scrollbar whitespace-nowrap border-b border-gray-100">
+                    <div class="flex space-x-3 px-2 items-stretch">
+                        
+                        <!-- 設定首日 -->
+                        <div class="start-date-config shadow-sm">
+                            <i class="fa-solid fa-calendar-day text-xs mb-1"></i>
+                            <span class="text-[10px] font-bold">設定首日</span>
+                            <input 
+                                type="date" 
+                                v-model="startDate" 
+                                @change="handleStartDateChange"
+                                class="date-input-hidden"
+                            >
+                        </div>
+
+                        <div 
+                            v-for="(day, index) in days" 
+                            :key="index"
+                            @click="currentDayIndex = index"
+                            class="px-3 py-2 rounded-2xl transition-all duration-200 flex-shrink-0 flex flex-col items-center min-w-[90px] relative cursor-pointer"
+                            :class="currentDayIndex === index ? 'bg-blue-600 text-white shadow-lg transform scale-105' : 'bg-gray-50 text-gray-500'"
+                        >
+                            <span class="text-[9px] font-bold opacity-80 mb-0.5">DAY {{ index + 1 }}</span>
+                            <span class="text-[11px] font-bold">{{ formatDisplayDate(day.date) }}</span>
+                        </div>
+
+                        <button @click="addDay" class="px-5 py-2 rounded-2xl bg-gray-50 text-blue-500 border border-dashed border-blue-200 flex flex-col items-center justify-center min-w-[75px]">
+                            <i class="fa-solid fa-plus text-xs"></i>
+                            <span class="text-[10px] font-bold mt-1">新增天數</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 列表內容 -->
+                <main class="flex-1 overflow-y-auto no-scrollbar relative p-4 bg-gray-50 pb-24">
+                    <div v-if="currentDayEvents.length === 0" class="flex flex-col items-center justify-center h-64 text-gray-400">
+                        <div class="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mb-4">
+                            <i class="fa-solid fa-map-location-dot text-2xl text-gray-400"></i>
+                        </div>
+                        <p>這天還沒有行程安排</p>
                     </div>
 
-                    <div v-for="(day, index) in days" :key="index" @click="currentDayIndex = index"
-                        class="px-4 py-2 rounded-2xl min-w-[90px] flex flex-col items-center cursor-pointer transition-all"
-                        :class="currentDayIndex === index ? 'bg-blue-600 text-white shadow-lg scale-105' : 'bg-gray-100 text-gray-500'">
-                        <span class="text-[9px] font-bold opacity-70 uppercase">Day {{ index + 1 }}</span>
-                        <span class="text-[11px] font-bold">{{ formatDisplayDate(day.date) }}</span>
-                    </div>
+                    <div v-else class="space-y-4 relative mt-2">
+                        <div class="timeline-line"></div>
+                        <div v-for="(event, index) in currentDayEvents" :key="event.id" class="relative pl-14">
+                            <div class="absolute left-0 top-0 flex flex-col items-center w-12 z-10">
+                                <span class="text-[10px] font-bold text-gray-400 mb-1">{{ event.time }}</span>
+                                <div @click.stop="handleIconClick(event)" class="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm shadow-md border-4 border-white category-dot hover:brightness-110" 
+                                     :class="getTypeColor(event.type)">
+                                    <i :class="getTypeIcon(event.type)"></i>
+                                </div>
+                            </div>
 
-                    <button @click="addDay" class="px-5 rounded-2xl border-2 border-dashed border-gray-200 text-gray-400 text-xs">
-                        <i class="fa-solid fa-plus"></i>
+                            <div @click="toggleDetail(event.id)" class="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 active:scale-[0.98] transition-transform duration-100 cursor-pointer">
+                                <div class="flex justify-between items-start">
+                                    <h3 class="font-bold text-gray-800 text-lg leading-tight flex items-center">
+                                        {{ event.location }}
+                                        <i v-if="event.mapUrl" class="fa-solid fa-link text-[10px] ml-2 text-blue-400"></i>
+                                    </h3>
+                                </div>
+                                
+                                <div class="flex items-center justify-between mt-1.5">
+                                    <p class="text-gray-600 text-xs line-clamp-2 leading-relaxed">{{ event.note || '尚無備註' }}</p>
+                                    <span v-if="event.cost" class="text-[10px] font-bold bg-yellow-50 text-yellow-700 px-2 py-0.5 rounded-full ml-auto shrink-0 self-start">
+                                        {{ event.currency === 'TWD' ? 'NT$' : '¥' }}{{ event.cost }}
+                                    </span>
+                                </div>
+
+                                <div v-if="expandedEventId === event.id" class="mt-4 pt-3 border-t border-gray-100 fade-in">
+                                    <div class="grid grid-cols-2 gap-2 mb-2">
+                                        <button @click.stop="openGoogleMaps(event)" class="bg-blue-50 text-blue-600 py-2 rounded-xl text-sm font-medium">地圖</button>
+                                        <button @click.stop="openEditModal(event)" class="bg-gray-50 text-gray-600 py-2 rounded-xl text-sm font-medium">編輯</button>
+                                    </div>
+                                    <button @click.stop="deleteEvent(event.id)" class="w-full text-red-400 text-xs py-1">刪除此項目</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </main>
+                
+                <button @click="openAddModal" class="absolute bottom-6 right-6 w-14 h-14 bg-blue-600 text-white rounded-full shadow-lg shadow-blue-600/30 flex items-center justify-center text-2xl z-20 mb-[60px]">
+                    <i class="fa-solid fa-plus"></i>
+                </button>
+            </div>
+
+            <!-- 地圖視圖 -->
+            <div v-show="currentView === 'map'" class="flex-1 relative bg-gray-100 h-full">
+                <div id="map"></div>
+                <div class="absolute top-4 left-4 right-4 z-[400] flex gap-2 overflow-x-auto no-scrollbar">
+                     <button 
+                        v-for="(day, index) in days" 
+                        :key="index"
+                        @click="switchMapDay(index)"
+                        class="px-3 py-1.5 rounded-full text-xs font-bold shadow-md whitespace-nowrap"
+                        :class="currentDayIndex === index ? 'bg-blue-600 text-white' : 'bg-white text-gray-700'"
+                    >
+                        {{ formatDisplayDate(day.date) }}
                     </button>
                 </div>
             </div>
-
-            <!-- 行程表 -->
-            <main class="flex-1 overflow-y-auto p-4 relative no-scrollbar pb-24">
-                <div v-if="currentDayEvents.length === 0" class="flex flex-col items-center justify-center h-64 text-gray-300">
-                    <i class="fa-solid fa-umbrella-beach text-4xl mb-3"></i>
-                    <p class="text-sm">這天還沒有行程</p>
-                </div>
-
-                <div v-else class="space-y-4 relative mt-2">
-                    <div class="timeline-line"></div>
-                    <div v-for="event in currentDayEvents" :key="event.id" class="relative pl-14">
-                        <div class="absolute left-0 top-0 flex flex-col items-center w-12 z-10">
-                            <span class="text-[10px] font-bold text-gray-400 mb-1">{{ event.time }}</span>
-                            <div @click="toggleDetail(event.id)" class="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs shadow-md border-4 border-white cursor-pointer" :class="getTypeColor(event.type)">
-                                <i :class="getTypeIcon(event.type)"></i>
-                            </div>
-                        </div>
-
-                        <div @click="toggleDetail(event.id)" class="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 active:scale-95 transition-transform">
-                            <div class="flex justify-between items-start">
-                                <h3 class="font-bold text-gray-800">{{ event.location }}</h3>
-                                <span v-if="event.cost" class="text-[10px] font-bold text-orange-500 bg-orange-50 px-2 py-0.5 rounded-full">
-                                    {{ event.currency === 'JPY' ? '¥' : '$' }}{{ event.cost }}
-                                </span>
-                            </div>
-                            <p class="text-gray-400 text-xs mt-1 truncate">{{ event.note || '點擊展開詳情' }}</p>
-                            
-                            <!-- 展開選項 -->
-                            <div v-if="expandedId === event.id" class="mt-4 pt-3 border-t border-gray-50 grid grid-cols-2 gap-2">
-                                <button @click.stop="openMap(event)" class="py-2 bg-blue-50 text-blue-600 rounded-xl text-xs font-bold flex items-center justify-center">
-                                    <i class="fa-solid fa-map-location-dot mr-1"></i> 地圖
-                                </button>
-                                <button @click.stop="editEvent(event)" class="py-2 bg-gray-50 text-gray-600 rounded-xl text-xs font-bold">
-                                    <i class="fa-solid fa-pen-to-square mr-1"></i> 編輯
-                                </button>
-                                <button @click.stop="removeEvent(event.id)" class="col-span-2 py-2 text-red-400 text-[10px] mt-1">
-                                    <i class="fa-solid fa-trash-can mr-1"></i> 刪除此項目
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </main>
-
-            <!-- 新增按鈕 -->
-            <button @click="showAddModal" class="absolute bottom-6 right-6 w-14 h-14 bg-blue-600 text-white rounded-full shadow-xl flex items-center justify-center text-2xl z-20 active:scale-90 transition-transform">
-                <i class="fa-solid fa-plus"></i>
-            </button>
         </div>
 
-        <!-- 編輯/新增 Modal -->
+        <!-- 底部導航 -->
+        <nav class="bg-white border-t border-gray-100 flex justify-around items-center h-[65px] shrink-0 z-30">
+            <button @click="currentView = 'list'" class="flex flex-col items-center justify-center w-full h-full" :class="currentView === 'list' ? 'text-blue-600' : 'text-gray-300'">
+                <i class="fa-solid fa-rectangle-list text-xl"></i>
+                <span class="text-[10px] mt-1 font-bold">行程表</span>
+            </button>
+            <button @click="switchView('map')" class="flex flex-col items-center justify-center w-full h-full" :class="currentView === 'map' ? 'text-blue-600' : 'text-gray-300'">
+                <i class="fa-solid fa-map-location text-xl"></i>
+                <span class="text-[10px] mt-1 font-bold">地圖</span>
+            </button>
+        </nav>
+
+        <!-- 彈窗 -->
         <transition name="slide-up">
-            <div v-if="modalVisible" class="fixed inset-0 z-[60] flex items-end">
-                <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" @click="modalVisible = false"></div>
-                <div class="bg-white w-full rounded-t-[32px] p-6 relative z-10 max-h-[92vh] flex flex-col">
-                    <div class="w-12 h-1 bg-gray-200 rounded-full mx-auto mb-6 shrink-0"></div>
-                    <h3 class="text-lg font-bold text-gray-800 mb-4">{{ isEditing ? '編輯行程' : '新增行程' }}</h3>
+            <div v-if="showModal" class="fixed inset-0 z-50 flex items-end">
+                <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" @click="closeModal"></div>
+                <div class="bg-white w-full rounded-t-[32px] p-6 relative z-10 h-[90vh] flex flex-col shadow-2xl">
+                    <div class="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6 shrink-0"></div>
+                    <h3 class="text-xl font-bold text-gray-800 mb-4">{{ isEditing ? '編輯行程' : '新增行程' }}</h3>
                     
-                    <div class="space-y-4 overflow-y-auto no-scrollbar pb-6 flex-1">
+                    <form @submit.prevent="saveEvent" class="space-y-4 overflow-y-auto flex-1 pb-6 no-scrollbar">
                         <div class="grid grid-cols-2 gap-4">
-                            <div class="space-y-1">
-                                <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">時間</label>
-                                <input type="time" v-model="form.time" class="w-full bg-gray-50 rounded-xl p-3 border-none outline-none text-sm">
+                            <div>
+                                <label class="block text-xs font-bold text-gray-400 mb-2 uppercase">抵達時間</label>
+                                <input v-model="form.time" type="time" required class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm">
                             </div>
-                            <div class="space-y-1">
-                                <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">類別</label>
-                                <select v-model="form.type" class="w-full bg-gray-50 rounded-xl p-3 border-none outline-none text-sm appearance-none">
+                            <div>
+                                <label class="block text-xs font-bold text-gray-400 mb-2 uppercase">類別</label>
+                                <select v-model="form.type" class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm">
                                     <option value="sight">景點</option>
                                     <option value="food">美食</option>
                                     <option value="shopping">購物</option>
@@ -165,217 +311,250 @@
                                 </select>
                             </div>
                         </div>
-                        <div class="space-y-1">
-                            <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">地點名稱</label>
-                            <input type="text" v-model="form.location" placeholder="輸入目的地" class="w-full bg-gray-50 rounded-xl p-3 border-none outline-none text-sm">
+                        <div>
+                            <label class="block text-xs font-bold text-gray-400 mb-2 uppercase">地點名稱</label>
+                            <input v-model="form.location" placeholder="地點名稱" required class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm">
                         </div>
-
-                        <!-- Google Maps 連結 -->
-                        <div class="space-y-1">
-                            <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center">
-                                <i class="fa-solid fa-map-pin mr-1 text-blue-500"></i> Google 地圖連結 (選填)
-                            </label>
-                            <input type="url" v-model="form.mapUrl" placeholder="貼上地圖連結（留空則自動搜尋名稱）" class="w-full bg-gray-50 rounded-xl p-3 border-none outline-none text-sm">
+                        <div>
+                            <label class="block text-xs font-bold text-gray-400 mb-2 uppercase">Google 地圖連結</label>
+                            <input v-model="form.mapUrl" placeholder="https://..." class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm">
                         </div>
-
                         <div class="grid grid-cols-2 gap-4">
-                            <div class="space-y-1">
-                                <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">金額</label>
-                                <input type="number" v-model="form.cost" placeholder="0" class="w-full bg-gray-50 rounded-xl p-3 border-none outline-none text-sm">
+                            <div>
+                                <label class="block text-xs font-bold text-gray-400 mb-2 uppercase">預算金額</label>
+                                <input v-model.number="form.cost" type="number" placeholder="0" class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm">
                             </div>
-                            <div class="space-y-1">
-                                <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">幣別</label>
-                                <select v-model="form.currency" class="w-full bg-gray-50 rounded-xl p-3 border-none outline-none text-sm appearance-none">
+                            <div>
+                                <label class="block text-xs font-bold text-gray-400 mb-2 uppercase">幣別</label>
+                                <select v-model="form.currency" class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm">
                                     <option value="JPY">日圓 (¥)</option>
                                     <option value="TWD">台幣 ($)</option>
                                 </select>
                             </div>
                         </div>
-                        <div class="space-y-1">
-                            <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">備註</label>
-                            <textarea v-model="form.note" rows="2" placeholder="交通路線、營業時間或想吃的菜單..." class="w-full bg-gray-50 rounded-xl p-3 border-none outline-none text-sm"></textarea>
+                        <div>
+                            <label class="block text-xs font-bold text-gray-400 mb-2 uppercase">筆記</label>
+                            <textarea v-model="form.note" rows="2" placeholder="行程備註..." class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm"></textarea>
                         </div>
-                    </div>
-
-                    <div class="flex space-x-3 pt-4 border-t border-gray-50 shrink-0">
-                        <button @click="modalVisible = false" class="flex-1 py-4 bg-gray-100 text-gray-500 rounded-2xl font-bold">取消</button>
-                        <button @click="saveToData" class="flex-[2] py-4 bg-blue-600 text-white rounded-2xl font-bold shadow-lg shadow-blue-200 active:bg-blue-700">儲存變更</button>
+                    </form>
+                    
+                    <div class="pt-4 flex space-x-3 mt-auto">
+                        <button type="button" @click="closeModal" class="flex-1 py-4 bg-gray-100 text-gray-600 rounded-2xl font-bold">取消</button>
+                        <button @click="saveEvent" class="flex-2 py-4 bg-blue-600 text-white rounded-2xl font-bold w-[60%]">儲存</button>
                     </div>
                 </div>
             </div>
         </transition>
+
     </div>
 </div>
 
-<script type="module">
-    const { createApp, ref, computed, onMounted, nextTick } = Vue;
+<script>
+    const { createApp, ref, computed, onMounted, watch, nextTick } = Vue;
 
     createApp({
         setup() {
-            // Firebase 配置獲取
-            const firebaseConfig = JSON.parse(window.__firebase_config);
-            const appId = typeof __app_id !== 'undefined' ? __app_id : 'osaka-travel-v1';
-            
-            const mainTitle = ref('我的日本旅行');
+            const STORAGE_KEY = 'osakaTripPro_v3';
+            const mainTitle = ref('大阪之旅');
+            const isEditingMainTitle = ref(false);
+            const mainTitleInput = ref(null);
             const startDate = ref(new Date().toISOString().split('T')[0]);
-            const days = ref([{ date: '', events: [] }]);
-            const currentDayIndex = ref(0);
-            const isLoading = ref(true);
-            const userId = ref('初始化中...');
-            const expandedId = ref(null);
-            const modalVisible = ref(false);
-            const isEditing = ref(false);
             
-            // 表單初始狀態
-            const initialForm = { id: null, time: '09:00', location: '', type: 'sight', note: '', cost: '', currency: 'JPY', mapUrl: '' };
-            const form = ref({ ...initialForm });
+            // 預設行程
+            const defaultDays = [
+                { date: '', events: [
+                    { id: 1, time: '14:00', location: '關西國際機場', type: 'transport', note: '領取周遊券', cost: 3000, currency: 'JPY', mapUrl: '' },
+                    { id: 2, time: '18:00', location: '道頓堀', type: 'food', note: '晚餐時間', cost: 2000, currency: 'JPY', mapUrl: '' }
+                ] },
+                { date: '', events: [] }
+            ];
 
-            let db, auth;
+            const days = ref(defaultDays);
+            const currentDayIndex = ref(0);
+            const currentView = ref('list'); 
+            const showModal = ref(false);
+            const isEditing = ref(false);
+            const expandedEventId = ref(null);
+            const mapInstance = ref(null);
+            const form = ref({ id: null, time: '09:00', location: '', type: 'sight', note: '', cost: '', currency: 'JPY', mapUrl: '' });
 
-            onMounted(async () => {
-                const { initializeApp, getFirestore, doc, onSnapshot, getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } = window.firebaseModules;
-                
-                const app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
-                auth = getAuth(app);
-
-                const performSignIn = async () => {
-                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                        await signInWithCustomToken(auth, __initial_auth_token);
-                    } else {
-                        await signInAnonymously(auth);
+            // --- 載入與儲存資料 ---
+            const loadFromLocal = () => {
+                const saved = localStorage.getItem(STORAGE_KEY);
+                if (saved) {
+                    try {
+                        const parsed = JSON.parse(saved);
+                        days.value = parsed.days || defaultDays;
+                        startDate.value = parsed.startDate || new Date().toISOString().split('T')[0];
+                        mainTitle.value = parsed.mainTitle || '大阪之旅';
+                        recalculateAllDates();
+                    } catch (e) {
+                        console.error('資料解析失敗');
                     }
-                };
-
-                await performSignIn();
-
-                onAuthStateChanged(auth, (user) => {
-                    if (user) {
-                        userId.value = user.uid;
-                        const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'itinerary', 'current');
-                        
-                        onSnapshot(docRef, (snapshot) => {
-                            if (snapshot.exists()) {
-                                const data = snapshot.data();
-                                mainTitle.value = data.mainTitle || mainTitle.value;
-                                startDate.value = data.startDate || startDate.value;
-                                days.value = data.days || days.value;
-                            } else {
-                                // 首次登入
-                                syncToCloud();
-                            }
-                            isLoading.value = false;
-                        }, (err) => {
-                            console.error("Firestore Listen Error:", err);
-                            isLoading.value = false;
-                        });
-                    }
-                });
-            });
-
-            // 統一同步至雲端
-            const syncToCloud = async () => {
-                if (!auth.currentUser) return;
-                const { doc, setDoc } = window.firebaseModules;
-                const docRef = doc(db, 'artifacts', appId, 'users', auth.currentUser.uid, 'itinerary', 'current');
-                
-                try {
-                    await setDoc(docRef, {
-                        mainTitle: mainTitle.value,
-                        startDate: startDate.value,
-                        days: JSON.parse(JSON.stringify(days.value)), // 深層拷貝確保格式正確
-                        updatedAt: new Date().toISOString()
-                    });
-                } catch (e) {
-                    console.error("Cloud Sync Failed:", e);
                 }
             };
 
-            const recalculateDates = () => {
-                const start = new Date(startDate.value);
-                days.value.forEach((day, i) => {
-                    const d = new Date(start);
-                    d.setDate(start.getDate() + i);
-                    day.date = d.toISOString().split('T')[0];
-                });
+            const saveToLocal = () => {
+                const data = {
+                    days: days.value,
+                    startDate: startDate.value,
+                    mainTitle: mainTitle.value
+                };
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
             };
 
-            const handleDateChange = () => {
-                recalculateDates();
-                syncToCloud();
-            };
-
-            const currentDayEvents = computed(() => {
-                const currentDay = days.value[currentDayIndex.value];
-                if (!currentDay || !currentDay.events) return [];
-                return [...currentDay.events].sort((a, b) => a.time.localeCompare(b.time));
+            onMounted(() => {
+                loadFromLocal();
             });
 
-            const formatDisplayDate = (d) => {
-                if (!d) return '';
-                const parts = d.split('-');
-                return `${parts[1]}/${parts[2]}`;
-            };
-            
-            const addDay = () => {
-                days.value.push({ date: '', events: [] });
-                recalculateDates();
-                currentDayIndex.value = days.value.length - 1;
-                syncToCloud();
+            watch([days, mainTitle, startDate], saveToLocal, { deep: true });
+
+            // --- 匯出與匯入功能 ---
+            const exportData = () => {
+                const data = {
+                    mainTitle: mainTitle.value,
+                    startDate: startDate.value,
+                    days: days.value,
+                    exportAt: new Date().toISOString()
+                };
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${mainTitle.value || 'trip'}_backup.json`;
+                a.click();
+                URL.revokeObjectURL(url);
             };
 
-            const showAddModal = () => {
-                isEditing.value = false;
-                form.value = { ...initialForm, id: `e_${Date.now()}_${Math.random().toString(36).substr(2, 5)}` };
-                modalVisible.value = true;
+            const triggerImport = () => {
+                document.getElementById('import-file').click();
             };
 
-            const editEvent = (ev) => {
-                isEditing.value = true;
-                form.value = { ...ev }; // 淺拷貝
-                modalVisible.value = true;
-            };
+            const handleImport = (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
 
-            const saveToData = () => {
-                if (!form.value.location.trim()) {
-                    alert("請輸入地點名稱");
+                if (!confirm('匯入資料將會覆蓋目前的所有行程，確定要繼續嗎？')) {
+                    event.target.value = '';
                     return;
                 }
 
-                const day = days.value[currentDayIndex.value];
-                if (isEditing.value) {
-                    const idx = day.events.findIndex(e => e.id === form.value.id);
-                    if (idx !== -1) {
-                        day.events[idx] = { ...form.value };
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const importedData = JSON.parse(e.target.result);
+                        if (importedData.days && Array.isArray(importedData.days)) {
+                            mainTitle.value = importedData.mainTitle || '我的旅行';
+                            startDate.value = importedData.startDate || new Date().toISOString().split('T')[0];
+                            days.value = importedData.days;
+                            currentDayIndex.value = 0;
+                            recalculateAllDates();
+                            alert('資料匯入成功！');
+                        } else {
+                            alert('無效的檔案格式');
+                        }
+                    } catch (err) {
+                        alert('檔案解析錯誤');
                     }
-                } else {
-                    day.events.push({ ...form.value });
-                }
-                
-                modalVisible.value = false;
-                syncToCloud();
+                };
+                reader.readAsText(file);
+                event.target.value = ''; // 清除輸入框
             };
 
-            const removeEvent = (id) => {
-                if (confirm("確定刪除此行程？")) {
-                    const day = days.value[currentDayIndex.value];
-                    day.events = day.events.filter(e => e.id !== id);
-                    syncToCloud();
-                }
+            // --- 日期計算 ---
+            const recalculateAllDates = () => {
+                const start = new Date(startDate.value);
+                days.value.forEach((day, index) => {
+                    const current = new Date(start);
+                    current.setDate(start.getDate() + index);
+                    day.date = current.toISOString().split('T')[0];
+                });
             };
 
-            const toggleDetail = (id) => {
-                expandedId.value = expandedId.value === id ? null : id;
+            const handleStartDateChange = () => {
+                recalculateAllDates();
             };
+
+            const currentDayEvents = computed(() => {
+                if (!days.value[currentDayIndex.value]) return [];
+                return [...days.value[currentDayIndex.value].events].sort((a,b) => a.time.localeCompare(b.time));
+            });
             
+            const formatDisplayDate = (dateString) => {
+                if (!dateString) return '';
+                const d = new Date(dateString);
+                return `${d.getMonth() + 1}/${d.getDate()}`;
+            };
+
+            const addDay = () => {
+                days.value.push({ date: '', events: [] });
+                recalculateAllDates();
+                currentDayIndex.value = days.value.length - 1;
+            };
+
             const editMainTitle = () => {
-                const res = prompt("編輯旅程標題：", mainTitle.value);
-                if (res !== null && res.trim() !== "") {
-                    mainTitle.value = res;
-                    syncToCloud();
+                isEditingMainTitle.value = true;
+                nextTick(() => { if (mainTitleInput.value) mainTitleInput.value.focus(); });
+            };
+
+            const saveMainTitle = () => {
+                if (!mainTitle.value.trim()) mainTitle.value = '我的旅行';
+                isEditingMainTitle.value = false;
+            };
+
+            const openAddModal = () => { 
+                isEditing.value = false; 
+                form.value = { id: Date.now(), time: '09:00', location: '', type: 'sight', note: '', cost: '', currency: 'JPY', mapUrl: '' }; 
+                showModal.value = true; 
+            };
+
+            const openEditModal = (ev) => { isEditing.value = true; form.value = { ...ev }; showModal.value = true; };
+            const closeModal = () => showModal.value = false;
+
+            const saveEvent = () => {
+                const target = days.value[currentDayIndex.value].events;
+                if (isEditing.value) {
+                    const idx = target.findIndex(e => e.id === form.value.id);
+                    if (idx !== -1) target[idx] = { ...form.value };
+                } else {
+                    target.push({ ...form.value });
+                }
+                closeModal();
+            };
+
+            const deleteEvent = (id) => {
+                if(confirm('確定刪除此項目？')) {
+                    days.value[currentDayIndex.value].events = days.value[currentDayIndex.value].events.filter(e => e.id !== id);
                 }
             };
 
+            const switchView = (view) => {
+                currentView.value = view;
+                if (view === 'map') {
+                    nextTick(() => {
+                        if (!mapInstance.value) {
+                            mapInstance.value = L.map('map', { zoomControl: false }).setView([34.6937, 135.5023], 13);
+                            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(mapInstance.value);
+                        }
+                        setTimeout(() => mapInstance.value.invalidateSize(), 300);
+                    });
+                }
+            };
+
+            const resetData = () => {
+                if(confirm('確定要清除所有紀錄並重置嗎？')) {
+                    localStorage.removeItem(STORAGE_KEY);
+                    location.reload();
+                }
+            };
+
+            const toggleDetail = (id) => expandedEventId.value = expandedEventId.value === id ? null : id;
+            const openGoogleMaps = (event) => {
+                const url = event.mapUrl || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(event.location)}`;
+                window.open(url, '_blank');
+            };
+            const handleIconClick = (event) => toggleDetail(event.id);
+            
             const getTypeIcon = (t) => {
                 const icons = { sight: 'fa-camera', food: 'fa-utensils', shopping: 'fa-bag-shopping', transport: 'fa-train' };
                 return `fa-solid ${icons[t] || 'fa-location-dot'}`;
@@ -386,59 +565,20 @@
                 return colors[t] || 'bg-gray-400';
             };
 
-            const openMap = (e) => {
-                if (e.mapUrl && (e.mapUrl.startsWith('http'))) {
-                    window.open(e.mapUrl, '_blank');
-                } else {
-                    window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(e.location)}`, '_blank');
-                }
-            };
-
-            // 匯出匯入功能
-            const exportData = () => {
-                const data = { mainTitle: mainTitle.value, startDate: startDate.value, days: days.value };
-                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `${mainTitle.value}_backup.json`;
-                a.click();
-            };
-
-            const triggerImport = () => document.getElementById('import-file').click();
-            
-            const handleImport = (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = (event) => {
-                    try {
-                        const imported = JSON.parse(event.target.result);
-                        mainTitle.value = imported.mainTitle || mainTitle.value;
-                        startDate.value = imported.startDate || startDate.value;
-                        days.value = imported.days || [];
-                        syncToCloud();
-                    } catch { alert('檔案格式不支援'); }
-                };
-                reader.readAsText(file);
-            };
-
-            const resetData = () => {
-                if(confirm("重置將刪除所有雲端行程資料，確定嗎？")) {
-                    days.value = [{ date: '', events: [] }];
-                    recalculateDates();
-                    syncToCloud();
-                }
-            };
-
             return {
-                mainTitle, startDate, days, currentDayIndex, currentDayEvents, isLoading, userId, expandedId,
-                modalVisible, isEditing, form,
-                formatDisplayDate, addDay, handleDateChange, showAddModal, editEvent, saveToData, removeEvent,
-                toggleDetail, getTypeIcon, getTypeColor, openMap, editMainTitle, exportData, triggerImport, handleImport, resetData
+                mainTitle, isEditingMainTitle, mainTitleInput, editMainTitle, saveMainTitle,
+                startDate, handleStartDateChange,
+                days, currentDayIndex, currentDayEvents,
+                showModal, isEditing, form, expandedEventId,
+                currentView, switchView,
+                formatDisplayDate, addDay, resetData, handleIconClick,
+                openAddModal, openEditModal, closeModal, saveEvent, deleteEvent, toggleDetail,
+                openGoogleMaps, getTypeIcon, getTypeColor,
+                exportData, triggerImport, handleImport
             };
         }
     }).mount('#app');
 </script>
+
 </body>
 </html>

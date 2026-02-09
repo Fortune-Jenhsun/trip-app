@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>自由行小幫手</title>
+    <title>大阪自由行助手 Pro</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -16,10 +16,6 @@
     
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
-
-    <!-- Leaflet CSS (Map) -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
     <style>
         body {
@@ -65,9 +61,6 @@
         .fade-in { animation: fadeIn 0.3s ease-in; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
-        #map { height: 100%; width: 100%; z-index: 0; }
-        .leaflet-control-attribution { display: none; }
-
         .title-input {
             border: none;
             background: #f8fafc;
@@ -94,34 +87,17 @@
             cursor: pointer;
             transition: all 0.2s;
         }
-        
-        .start-date-config:active {
-            background-color: #dbeafe;
-        }
 
         .date-input-hidden {
             position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            opacity: 0;
-            cursor: pointer;
+            top: 0; left: 0; width: 100%; height: 100%;
+            opacity: 0; cursor: pointer;
         }
 
-        .category-dot {
-            transition: all 0.3s ease;
-            cursor: pointer;
-        }
+        .category-dot { transition: all 0.3s ease; cursor: pointer; }
+        .category-dot:active { transform: scale(0.9); }
         
-        .category-dot:active {
-            transform: scale(0.9);
-        }
-
-        /* 隱藏的檔案輸入框 */
-        #import-file {
-            display: none;
-        }
+        .check-item-done { text-decoration: line-through; opacity: 0.5; }
     </style>
 </head>
 <body>
@@ -131,7 +107,7 @@
         
         <!-- Header -->
         <header class="bg-white px-4 py-4 border-b border-gray-100 flex items-center justify-between shrink-0 z-20 shadow-sm">
-            <div class="flex-1 mr-4">
+            <div class="flex-1">
                 <div v-if="isEditingMainTitle" class="flex items-center gap-2">
                     <input 
                         ref="mainTitleInput"
@@ -146,51 +122,24 @@
                     <i class="fa-solid fa-pen text-[10px] ml-2 text-gray-300"></i>
                 </h1>
             </div>
-            
-            <!-- 右上角功能按鈕區 -->
-            <div class="flex space-x-1 shrink-0">
-                <!-- 匯入按鈕 -->
-                <button @click="triggerImport" class="text-gray-500 hover:text-blue-600 text-sm p-2" title="匯入 JSON 檔案">
-                    <i class="fa-solid fa-file-import"></i>
-                </button>
-                <input type="file" id="import-file" accept=".json" @change="handleImport">
-
-                <!-- 匯出按鈕 -->
-                <button @click="exportData" class="text-gray-500 hover:text-blue-600 text-sm p-2" title="匯出為 JSON 檔案">
-                    <i class="fa-solid fa-file-export"></i>
-                </button>
-
-                <!-- 重置按鈕 -->
-                <button @click="resetData" class="text-gray-400 hover:text-red-500 text-sm p-2" title="清除所有本地資料">
-                    <i class="fa-solid fa-rotate-right"></i>
-                </button>
-            </div>
         </header>
 
         <!-- Main Content -->
         <div class="flex-1 relative overflow-hidden flex flex-col">
             
-            <!-- 行程列表 -->
-            <div v-show="currentView === 'list'" class="flex-1 flex flex-col h-full">
+            <!-- 視圖 1: 行程列表 -->
+            <div v-show="currentView === 'list'" class="flex-1 flex flex-col h-full fade-in">
                 <!-- 日期導覽 -->
                 <div class="bg-white shrink-0 px-2 py-4 z-10 overflow-x-auto no-scrollbar whitespace-nowrap border-b border-gray-100">
                     <div class="flex space-x-3 px-2 items-stretch">
-                        
-                        <!-- 設定首日 -->
                         <div class="start-date-config shadow-sm">
                             <i class="fa-solid fa-calendar-day text-xs mb-1"></i>
                             <span class="text-[10px] font-bold">設定首日</span>
-                            <input 
-                                type="date" 
-                                v-model="startDate" 
-                                @change="handleStartDateChange"
-                                class="date-input-hidden"
-                            >
+                            <input type="date" v-model="startDate" @change="handleStartDateChange" class="date-input-hidden">
                         </div>
 
                         <div 
-                            v-for="(day, index) in days" 
-                            :key="index"
+                            v-for="(day, index) in days" :key="index"
                             @click="currentDayIndex = index"
                             class="px-3 py-2 rounded-2xl transition-all duration-200 flex-shrink-0 flex flex-col items-center min-w-[90px] relative cursor-pointer"
                             :class="currentDayIndex === index ? 'bg-blue-600 text-white shadow-lg transform scale-105' : 'bg-gray-50 text-gray-500'"
@@ -217,21 +166,17 @@
 
                     <div v-else class="space-y-4 relative mt-2">
                         <div class="timeline-line"></div>
-                        <div v-for="(event, index) in currentDayEvents" :key="event.id" class="relative pl-14">
+                        <div v-for="(event) in currentDayEvents" :key="event.id" class="relative pl-14">
                             <div class="absolute left-0 top-0 flex flex-col items-center w-12 z-10">
                                 <span class="text-[10px] font-bold text-gray-400 mb-1">{{ event.time }}</span>
-                                <div @click.stop="handleIconClick(event)" class="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm shadow-md border-4 border-white category-dot hover:brightness-110" 
-                                     :class="getTypeColor(event.type)">
+                                <div @click.stop="toggleDetail(event.id)" class="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm shadow-md border-4 border-white category-dot hover:brightness-110" :class="getTypeColor(event.type)">
                                     <i :class="getTypeIcon(event.type)"></i>
                                 </div>
                             </div>
 
                             <div @click="toggleDetail(event.id)" class="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 active:scale-[0.98] transition-transform duration-100 cursor-pointer">
                                 <div class="flex justify-between items-start">
-                                    <h3 class="font-bold text-gray-800 text-lg leading-tight flex items-center">
-                                        {{ event.location }}
-                                        <i v-if="event.mapUrl" class="fa-solid fa-link text-[10px] ml-2 text-blue-400"></i>
-                                    </h3>
+                                    <h3 class="font-bold text-gray-800 text-lg leading-tight">{{ event.location }}</h3>
                                 </div>
                                 
                                 <div class="flex items-center justify-between mt-1.5">
@@ -258,43 +203,93 @@
                 </button>
             </div>
 
-            <!-- 地圖視圖 -->
-            <div v-show="currentView === 'map'" class="flex-1 relative bg-gray-100 h-full">
-                <div id="map"></div>
-                <div class="absolute top-4 left-4 right-4 z-[400] flex gap-2 overflow-x-auto no-scrollbar">
-                     <button 
-                        v-for="(day, index) in days" 
-                        :key="index"
-                        @click="switchMapDay(index)"
-                        class="px-3 py-1.5 rounded-full text-xs font-bold shadow-md whitespace-nowrap"
-                        :class="currentDayIndex === index ? 'bg-blue-600 text-white' : 'bg-white text-gray-700'"
-                    >
-                        {{ formatDisplayDate(day.date) }}
-                    </button>
+            <!-- 視圖 2: 預算統計 -->
+            <div v-show="currentView === 'budget'" class="flex-1 overflow-y-auto p-6 bg-gray-50 fade-in">
+                <h2 class="text-xl font-bold text-gray-800 mb-6 flex items-center">
+                    <i class="fa-solid fa-wallet mr-2 text-blue-500"></i> 預算統計
+                </h2>
+                
+                <div class="grid grid-cols-2 gap-4 mb-6">
+                    <div class="bg-white p-4 rounded-3xl shadow-sm border border-gray-100">
+                        <p class="text-[10px] font-bold text-gray-400 uppercase">總日圓花費</p>
+                        <p class="text-2xl font-bold text-orange-500 mt-1">¥ {{ totalJPY.toLocaleString() }}</p>
+                    </div>
+                    <div class="bg-white p-4 rounded-3xl shadow-sm border border-gray-100">
+                        <p class="text-[10px] font-bold text-gray-400 uppercase">總台幣花費</p>
+                        <p class="text-2xl font-bold text-blue-500 mt-1">NT$ {{ totalTWD.toLocaleString() }}</p>
+                    </div>
+                </div>
+
+                <div class="space-y-3">
+                    <h3 class="text-sm font-bold text-gray-500 px-1">每日花費清單</h3>
+                    <div v-for="(day, idx) in days" :key="idx" class="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+                        <div class="flex justify-between items-center">
+                            <span class="font-bold text-gray-700">Day {{ idx + 1 }} ({{ formatDisplayDate(day.date) }})</span>
+                            <div class="text-right">
+                                <p v-if="getDayTotal(day, 'JPY') > 0" class="text-xs font-bold text-orange-500">¥ {{ getDayTotal(day, 'JPY').toLocaleString() }}</p>
+                                <p v-if="getDayTotal(day, 'TWD') > 0" class="text-xs font-bold text-blue-500">NT$ {{ getDayTotal(day, 'TWD').toLocaleString() }}</p>
+                                <p v-if="getDayTotal(day, 'JPY') === 0 && getDayTotal(day, 'TWD') === 0" class="text-xs text-gray-300">無紀錄</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 視圖 3: 準備清單 -->
+            <div v-show="currentView === 'checklist'" class="flex-1 overflow-y-auto p-6 bg-gray-50 fade-in">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-xl font-bold text-gray-800 flex items-center">
+                        <i class="fa-solid fa-clipboard-check mr-2 text-green-500"></i> 行前準備
+                    </h2>
+                    <button @click="addCheckItem" class="text-blue-600 text-sm font-bold">+ 新增項目</button>
+                </div>
+
+                <div class="space-y-3">
+                    <div v-for="(item, idx) in checklist" :key="idx" 
+                         @click="toggleCheck(idx)"
+                         class="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 flex items-center justify-between cursor-pointer active:bg-gray-50">
+                        <div class="flex items-center gap-3">
+                            <div class="w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors"
+                                 :class="item.done ? 'bg-green-500 border-green-500 text-white' : 'border-gray-200'">
+                                <i v-if="item.done" class="fa-solid fa-check text-[10px]"></i>
+                            </div>
+                            <span class="font-medium text-gray-700" :class="{'check-item-done': item.done}">{{ item.text }}</span>
+                        </div>
+                        <button @click.stop="removeCheckItem(idx)" class="text-gray-300 hover:text-red-400">
+                            <i class="fa-solid fa-xmark"></i>
+                        </button>
+                    </div>
+                    
+                    <div v-if="checklist.length === 0" class="text-center py-12 text-gray-400">
+                        <p class="text-sm">點擊上方按鈕新增準備事項</p>
+                    </div>
                 </div>
             </div>
         </div>
 
         <!-- 底部導航 -->
-        <nav class="bg-white border-t border-gray-100 flex justify-around items-center h-[65px] shrink-0 z-30">
+        <nav class="bg-white border-t border-gray-100 flex justify-around items-center h-[70px] shrink-0 z-30 pb-2">
             <button @click="currentView = 'list'" class="flex flex-col items-center justify-center w-full h-full" :class="currentView === 'list' ? 'text-blue-600' : 'text-gray-300'">
                 <i class="fa-solid fa-rectangle-list text-xl"></i>
                 <span class="text-[10px] mt-1 font-bold">行程表</span>
             </button>
-            <button @click="switchView('map')" class="flex flex-col items-center justify-center w-full h-full" :class="currentView === 'map' ? 'text-blue-600' : 'text-gray-300'">
-                <i class="fa-solid fa-map-location text-xl"></i>
-                <span class="text-[10px] mt-1 font-bold">地圖</span>
+            <button @click="currentView = 'budget'" class="flex flex-col items-center justify-center w-full h-full" :class="currentView === 'budget' ? 'text-blue-600' : 'text-gray-300'">
+                <i class="fa-solid fa-wallet text-xl"></i>
+                <span class="text-[10px] mt-1 font-bold">預算</span>
+            </button>
+            <button @click="currentView = 'checklist'" class="flex flex-col items-center justify-center w-full h-full" :class="currentView === 'checklist' ? 'text-blue-600' : 'text-gray-300'">
+                <i class="fa-solid fa-list-check text-xl"></i>
+                <span class="text-[10px] mt-1 font-bold">準備</span>
             </button>
         </nav>
 
-        <!-- 彈窗 -->
+        <!-- 彈窗 (與原本相同) -->
         <transition name="slide-up">
             <div v-if="showModal" class="fixed inset-0 z-50 flex items-end">
                 <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" @click="closeModal"></div>
-                <div class="bg-white w-full rounded-t-[32px] p-6 relative z-10 h-[90vh] flex flex-col shadow-2xl">
+                <div class="bg-white w-full rounded-t-[32px] p-6 relative z-10 h-[90vh] flex flex-col">
                     <div class="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6 shrink-0"></div>
                     <h3 class="text-xl font-bold text-gray-800 mb-4">{{ isEditing ? '編輯行程' : '新增行程' }}</h3>
-                    
                     <form @submit.prevent="saveEvent" class="space-y-4 overflow-y-auto flex-1 pb-6 no-scrollbar">
                         <div class="grid grid-cols-2 gap-4">
                             <div>
@@ -337,7 +332,6 @@
                             <textarea v-model="form.note" rows="2" placeholder="行程備註..." class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm"></textarea>
                         </div>
                     </form>
-                    
                     <div class="pt-4 flex space-x-3 mt-auto">
                         <button type="button" @click="closeModal" class="flex-1 py-4 bg-gray-100 text-gray-600 rounded-2xl font-bold">取消</button>
                         <button @click="saveEvent" class="flex-2 py-4 bg-blue-600 text-white rounded-2xl font-bold w-[60%]">儲存</button>
@@ -354,114 +348,52 @@
 
     createApp({
         setup() {
-            const STORAGE_KEY = 'osakaTripPro_v3';
-            const mainTitle = ref('大阪之旅');
+            const STORAGE_KEY = 'osakaTripPro_v4';
+            const mainTitle = ref('我的日本旅行');
             const isEditingMainTitle = ref(false);
             const mainTitleInput = ref(null);
             const startDate = ref(new Date().toISOString().split('T')[0]);
+            const currentView = ref('list');
             
-            // 預設行程
-            const defaultDays = [
+            const days = ref([
                 { date: '', events: [
-                    { id: 1, time: '14:00', location: '關西國際機場', type: 'transport', note: '領取周遊券', cost: 3000, currency: 'JPY', mapUrl: '' },
-                    { id: 2, time: '18:00', location: '道頓堀', type: 'food', note: '晚餐時間', cost: 2000, currency: 'JPY', mapUrl: '' }
-                ] },
-                { date: '', events: [] }
-            ];
+                    { id: 1, time: '14:00', location: '關西國際機場', type: 'transport', note: '領取周遊券', cost: 3000, currency: 'JPY', mapUrl: '' }
+                ] }
+            ]);
 
-            const days = ref(defaultDays);
+            const checklist = ref([
+                { text: '護照', done: false },
+                { text: 'Visit Japan Web 申報', done: false },
+                { text: '網卡/Wi-Fi機', done: false },
+                { text: '日幣現金', done: false }
+            ]);
+
             const currentDayIndex = ref(0);
-            const currentView = ref('list'); 
             const showModal = ref(false);
             const isEditing = ref(false);
             const expandedEventId = ref(null);
-            const mapInstance = ref(null);
             const form = ref({ id: null, time: '09:00', location: '', type: 'sight', note: '', cost: '', currency: 'JPY', mapUrl: '' });
 
-            // --- 載入與儲存資料 ---
-            const loadFromLocal = () => {
+            // 載入與儲存
+            const loadData = () => {
                 const saved = localStorage.getItem(STORAGE_KEY);
                 if (saved) {
-                    try {
-                        const parsed = JSON.parse(saved);
-                        days.value = parsed.days || defaultDays;
-                        startDate.value = parsed.startDate || new Date().toISOString().split('T')[0];
-                        mainTitle.value = parsed.mainTitle || '大阪之旅';
-                        recalculateAllDates();
-                    } catch (e) {
-                        console.error('資料解析失敗');
-                    }
+                    const parsed = JSON.parse(saved);
+                    days.value = parsed.days || days.value;
+                    startDate.value = parsed.startDate || startDate.value;
+                    mainTitle.value = parsed.mainTitle || mainTitle.value;
+                    checklist.value = parsed.checklist || checklist.value;
+                    recalculateAllDates();
                 }
             };
-
-            const saveToLocal = () => {
-                const data = {
-                    days: days.value,
-                    startDate: startDate.value,
-                    mainTitle: mainTitle.value
-                };
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+            const saveData = () => {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                    days: days.value, startDate: startDate.value, mainTitle: mainTitle.value, checklist: checklist.value
+                }));
             };
+            onMounted(loadData);
+            watch([days, mainTitle, startDate, checklist], saveData, { deep: true });
 
-            onMounted(() => {
-                loadFromLocal();
-            });
-
-            watch([days, mainTitle, startDate], saveToLocal, { deep: true });
-
-            // --- 匯出與匯入功能 ---
-            const exportData = () => {
-                const data = {
-                    mainTitle: mainTitle.value,
-                    startDate: startDate.value,
-                    days: days.value,
-                    exportAt: new Date().toISOString()
-                };
-                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `${mainTitle.value || 'trip'}_backup.json`;
-                a.click();
-                URL.revokeObjectURL(url);
-            };
-
-            const triggerImport = () => {
-                document.getElementById('import-file').click();
-            };
-
-            const handleImport = (event) => {
-                const file = event.target.files[0];
-                if (!file) return;
-
-                if (!confirm('匯入資料將會覆蓋目前的所有行程，確定要繼續嗎？')) {
-                    event.target.value = '';
-                    return;
-                }
-
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    try {
-                        const importedData = JSON.parse(e.target.result);
-                        if (importedData.days && Array.isArray(importedData.days)) {
-                            mainTitle.value = importedData.mainTitle || '我的旅行';
-                            startDate.value = importedData.startDate || new Date().toISOString().split('T')[0];
-                            days.value = importedData.days;
-                            currentDayIndex.value = 0;
-                            recalculateAllDates();
-                            alert('資料匯入成功！');
-                        } else {
-                            alert('無效的檔案格式');
-                        }
-                    } catch (err) {
-                        alert('檔案解析錯誤');
-                    }
-                };
-                reader.readAsText(file);
-                event.target.value = ''; // 清除輸入框
-            };
-
-            // --- 日期計算 ---
             const recalculateAllDates = () => {
                 const start = new Date(startDate.value);
                 days.value.forEach((day, index) => {
@@ -471,20 +403,9 @@
                 });
             };
 
-            const handleStartDateChange = () => {
-                recalculateAllDates();
-            };
-
-            const currentDayEvents = computed(() => {
-                if (!days.value[currentDayIndex.value]) return [];
-                return [...days.value[currentDayIndex.value].events].sort((a,b) => a.time.localeCompare(b.time));
-            });
-            
-            const formatDisplayDate = (dateString) => {
-                if (!dateString) return '';
-                const d = new Date(dateString);
-                return `${d.getMonth() + 1}/${d.getDate()}`;
-            };
+            const handleStartDateChange = () => recalculateAllDates();
+            const formatDisplayDate = (d) => d ? `${new Date(d).getMonth() + 1}/${new Date(d).getDate()}` : '';
+            const currentDayEvents = computed(() => [...days.value[currentDayIndex.value].events].sort((a,b) => a.time.localeCompare(b.time)));
 
             const addDay = () => {
                 days.value.push({ date: '', events: [] });
@@ -492,93 +413,50 @@
                 currentDayIndex.value = days.value.length - 1;
             };
 
-            const editMainTitle = () => {
-                isEditingMainTitle.value = true;
-                nextTick(() => { if (mainTitleInput.value) mainTitleInput.value.focus(); });
-            };
+            // 預算邏輯
+            const getDayTotal = (day, curr) => day.events.reduce((sum, e) => e.currency === curr ? sum + (Number(e.cost) || 0) : sum, 0);
+            const totalJPY = computed(() => days.value.reduce((sum, d) => sum + getDayTotal(d, 'JPY'), 0));
+            const totalTWD = computed(() => days.value.reduce((sum, d) => sum + getDayTotal(d, 'TWD'), 0));
 
-            const saveMainTitle = () => {
-                if (!mainTitle.value.trim()) mainTitle.value = '我的旅行';
-                isEditingMainTitle.value = false;
+            // 清單邏輯
+            const toggleCheck = (idx) => checklist.value[idx].done = !checklist.value[idx].done;
+            const addCheckItem = () => {
+                const text = prompt("輸入準備事項：");
+                if (text) checklist.value.push({ text, done: false });
             };
+            const removeCheckItem = (idx) => checklist.value.splice(idx, 1);
 
-            const openAddModal = () => { 
-                isEditing.value = false; 
-                form.value = { id: Date.now(), time: '09:00', location: '', type: 'sight', note: '', cost: '', currency: 'JPY', mapUrl: '' }; 
-                showModal.value = true; 
-            };
-
+            // 行程邏輯
+            const openAddModal = () => { isEditing.value = false; form.value = { id: Date.now(), time: '09:00', location: '', type: 'sight', note: '', cost: '', currency: 'JPY', mapUrl: '' }; showModal.value = true; };
             const openEditModal = (ev) => { isEditing.value = true; form.value = { ...ev }; showModal.value = true; };
             const closeModal = () => showModal.value = false;
-
             const saveEvent = () => {
                 const target = days.value[currentDayIndex.value].events;
                 if (isEditing.value) {
                     const idx = target.findIndex(e => e.id === form.value.id);
                     if (idx !== -1) target[idx] = { ...form.value };
-                } else {
-                    target.push({ ...form.value });
-                }
+                } else { target.push({ ...form.value }); }
                 closeModal();
             };
-
-            const deleteEvent = (id) => {
-                if(confirm('確定刪除此項目？')) {
-                    days.value[currentDayIndex.value].events = days.value[currentDayIndex.value].events.filter(e => e.id !== id);
-                }
-            };
-
-            const switchView = (view) => {
-                currentView.value = view;
-                if (view === 'map') {
-                    nextTick(() => {
-                        if (!mapInstance.value) {
-                            mapInstance.value = L.map('map', { zoomControl: false }).setView([34.6937, 135.5023], 13);
-                            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(mapInstance.value);
-                        }
-                        setTimeout(() => mapInstance.value.invalidateSize(), 300);
-                    });
-                }
-            };
-
-            const resetData = () => {
-                if(confirm('確定要清除所有紀錄並重置嗎？')) {
-                    localStorage.removeItem(STORAGE_KEY);
-                    location.reload();
-                }
-            };
-
+            const deleteEvent = (id) => { if(confirm('確定刪除？')) days.value[currentDayIndex.value].events = days.value[currentDayIndex.value].events.filter(e => e.id !== id); };
             const toggleDetail = (id) => expandedEventId.value = expandedEventId.value === id ? null : id;
-            const openGoogleMaps = (event) => {
-                const url = event.mapUrl || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(event.location)}`;
-                window.open(url, '_blank');
-            };
-            const handleIconClick = (event) => toggleDetail(event.id);
-            
-            const getTypeIcon = (t) => {
-                const icons = { sight: 'fa-camera', food: 'fa-utensils', shopping: 'fa-bag-shopping', transport: 'fa-train' };
-                return `fa-solid ${icons[t] || 'fa-location-dot'}`;
-            };
-            
-            const getTypeColor = (t) => {
-                const colors = { sight: 'bg-pink-500', food: 'bg-orange-500', shopping: 'bg-purple-500', transport: 'bg-blue-500' };
-                return colors[t] || 'bg-gray-400';
-            };
+            const openGoogleMaps = (e) => window.open(e.mapUrl || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(e.location)}`, '_blank');
+            const editMainTitle = () => { isEditingMainTitle.value = true; nextTick(() => mainTitleInput.value?.focus()); };
+            const saveMainTitle = () => isEditingMainTitle.value = false;
+
+            const getTypeIcon = (t) => ({ sight: 'fa-camera', food: 'fa-utensils', shopping: 'fa-bag-shopping', transport: 'fa-train' }[t] || 'fa-location-dot');
+            const getTypeColor = (t) => ({ sight: 'bg-pink-500', food: 'bg-orange-500', shopping: 'bg-purple-500', transport: 'bg-blue-500' }[t] || 'bg-gray-400');
 
             return {
                 mainTitle, isEditingMainTitle, mainTitleInput, editMainTitle, saveMainTitle,
-                startDate, handleStartDateChange,
-                days, currentDayIndex, currentDayEvents,
-                showModal, isEditing, form, expandedEventId,
-                currentView, switchView,
-                formatDisplayDate, addDay, resetData, handleIconClick,
-                openAddModal, openEditModal, closeModal, saveEvent, deleteEvent, toggleDetail,
-                openGoogleMaps, getTypeIcon, getTypeColor,
-                exportData, triggerImport, handleImport
+                startDate, handleStartDateChange, days, currentDayIndex, currentDayEvents,
+                showModal, isEditing, form, expandedEventId, currentView,
+                checklist, toggleCheck, addCheckItem, removeCheckItem,
+                totalJPY, totalTWD, getDayTotal,
+                formatDisplayDate, addDay, openAddModal, openEditModal, closeModal, saveEvent, deleteEvent, toggleDetail, openGoogleMaps, getTypeIcon, getTypeColor
             };
         }
     }).mount('#app');
 </script>
-
 </body>
 </html>

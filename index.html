@@ -20,8 +20,8 @@
     <!-- Firebase SDK (Modular) -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getFirestore, doc, onSnapshot, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+        import { getFirestore, doc, onSnapshot, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
         // --- Firebase 設定 ---
         const firebaseConfig = {
@@ -30,8 +30,7 @@
             projectId: "trip-app-f8674",
             storageBucket: "trip-app-f8674.firebasestorage.app",
             messagingSenderId: "465711624559",
-            appId: "1:465711624559:web:8ec3d9d96c6b242393b89a",
-            measurementId: "G-QHHGME5SWX"
+            appId: "1:465711624559:web:8ec3d9d96c6b242393b89a"
         };
 
         const app = initializeApp(firebaseConfig);
@@ -42,12 +41,15 @@
 
         createApp({
             setup() {
-                const userId = ref(null);
+                // --- 狀態定義 ---
+                const tripId = ref(localStorage.getItem('currentTripId') || null);
                 const isLoading = ref(true);
                 const isSaving = ref(false); 
                 const localLastUpdated = ref(0); 
+                const showIdModal = ref(false);
+                const inputId = ref('');
 
-                const mainTitle = ref('XX之旅');
+                const mainTitle = ref('我的旅行');
                 const isEditingMainTitle = ref(false);
                 const mainTitleInput = ref(null);
                 const startDate = ref(new Date().toISOString().split('T')[0]);
@@ -55,21 +57,39 @@
                 const days = ref([{ date: '', events: [] }]);
                 const checklist = ref([
                     { text: '護照', done: false },
-                    { text: '機票確認單', done: false },
-                    { text: '日本網卡/WiFi', done: false },
-                    { text: '外幣現金/信用卡', done: false }
+                    { text: '外幣現金', done: false }
                 ]);
 
                 const currentDayIndex = ref(0);
                 const showModal = ref(false);
                 const isEditing = ref(false);
                 const expandedEventId = ref(null);
-                
-                // Form 結構中加入了 mapUrl
                 const form = ref({ id: null, time: '09:00', location: '', type: 'sight', note: '', cost: '', currency: 'JPY', mapUrl: '' });
 
+                // --- 核心功能：生成與更換 Trip ID ---
+                const generateNewTripId = () => {
+                    const id = 'trip-' + Math.random().toString(36).substr(2, 9).toUpperCase();
+                    tripId.value = id;
+                    localStorage.setItem('currentTripId', id);
+                    return id;
+                };
+
+                const switchTrip = async (newId) => {
+                    if (!newId || newId === tripId.value) return;
+                    isLoading.value = true;
+                    tripId.value = newId;
+                    localStorage.setItem('currentTripId', newId);
+                    location.reload(); // 重整頁面以重新綁定 Snapshot 監聽
+                };
+
+                const copyTripId = () => {
+                    navigator.clipboard.writeText(tripId.value);
+                    alert('Trip ID 已複製！分享給好友即可同步行程。');
+                };
+
+                // --- Firebase 雲端同步 ---
                 const saveToCloud = async () => {
-                    if (!userId.value || isLoading.value) return;
+                    if (!tripId.value || isLoading.value) return;
                     isSaving.value = true;
                     const timestamp = new Date().getTime();
                     localLastUpdated.value = timestamp;
@@ -81,47 +101,49 @@
                             checklist: checklist.value,
                             updatedAt: timestamp 
                         };
-                        await setDoc(doc(db, "user_trips", userId.value), data);
+                        await setDoc(doc(db, "user_trips", tripId.value), data);
                     } catch (e) {
                         console.error("儲存失敗: ", e);
                     } finally {
-                        setTimeout(() => { isSaving.value = false; }, 1000);
+                        setTimeout(() => { isSaving.value = false; }, 800);
                     }
                 };
 
-                onMounted(() => {
-                    signInAnonymously(auth).catch(err => console.error("登入失敗", err));
-                    onAuthStateChanged(auth, (user) => {
-                        if (user) {
-                            userId.value = user.uid;
-                            onSnapshot(doc(db, "user_trips", user.uid), (docSnap) => {
-                                if (isSaving.value) return;
-                                if (docSnap.exists()) {
-                                    const data = docSnap.data();
-                                    const cloudUpdatedAt = data.updatedAt || 0;
-                                    if (cloudUpdatedAt > localLastUpdated.value) {
-                                        days.value = data.days || days.value;
-                                        startDate.value = data.startDate || startDate.value;
-                                        mainTitle.value = data.mainTitle || mainTitle.value;
-                                        checklist.value = data.checklist || checklist.value;
-                                        localLastUpdated.value = cloudUpdatedAt;
-                                    }
-                                }
-                                setTimeout(() => { isLoading.value = false; }, 800);
-                            }, (err) => {
-                                console.error("監聽失敗", err);
-                                isLoading.value = false;
-                            });
+                onMounted(async () => {
+                    // 1. 匿名登入
+                    await signInAnonymously(auth);
+
+                    // 2. 檢查 Trip ID
+                    if (!tripId.value) {
+                        generateNewTripId();
+                    }
+
+                    // 3. 監聽該 Trip ID 的數據
+                    onSnapshot(doc(db, "user_trips", tripId.value), (docSnap) => {
+                        if (isSaving.value) return;
+                        if (docSnap.exists()) {
+                            const data = docSnap.data();
+                            const cloudUpdatedAt = data.updatedAt || 0;
+                            if (cloudUpdatedAt > localLastUpdated.value) {
+                                days.value = data.days || days.value;
+                                startDate.value = data.startDate || startDate.value;
+                                mainTitle.value = data.mainTitle || mainTitle.value;
+                                checklist.value = data.checklist || checklist.value;
+                                localLastUpdated.value = cloudUpdatedAt;
+                            }
                         }
+                        setTimeout(() => { isLoading.value = false; }, 800);
                     });
                 });
 
+                // 監控變化自動儲存
                 watch([days, mainTitle, startDate, checklist], () => {
                     if (!isLoading.value && !isSaving.value) {
                         saveToCloud();
                     }
                 }, { deep: true });
 
+                // --- 其他小工具邏輯 ---
                 const recalculateAllDates = () => {
                     const start = new Date(startDate.value);
                     days.value.forEach((day, index) => {
@@ -182,8 +204,6 @@
                 
                 const deleteEvent = (id) => { if(confirm('確定刪除此行程？')) days.value[currentDayIndex.value].events = days.value[currentDayIndex.value].events.filter(e => e.id !== id); };
                 const toggleDetail = (id) => expandedEventId.value = expandedEventId.value === id ? null : id;
-                
-                // 優化開啟地圖邏輯：如果有貼連結則直接開啟連結，否則才用名稱搜尋
                 const openGoogleMaps = (e) => {
                     if (e.mapUrl && e.mapUrl.startsWith('http')) {
                         window.open(e.mapUrl, '_blank');
@@ -206,7 +226,8 @@
                 };
 
                 return {
-                    userId, isLoading, mainTitle, isEditingMainTitle, mainTitleInput, editMainTitle, saveMainTitle,
+                    tripId, inputId, showIdModal, copyTripId, switchTrip,
+                    isLoading, mainTitle, isEditingMainTitle, mainTitleInput, editMainTitle, saveMainTitle,
                     startDate, handleStartDateChange, days, currentDayIndex, currentDayEvents,
                     showModal, isEditing, form, expandedEventId, currentView,
                     checklist, toggleCheck, addCheckItem, removeCheckItem,
@@ -238,39 +259,10 @@
             color: white;
         }
 
-        .plane-box {
-            position: relative;
-            font-size: 3rem;
-            animation: flight 2s infinite ease-in-out;
-        }
-
-        .cloud-bg {
-            position: absolute;
-            font-size: 1.5rem;
-            opacity: 0.4;
-            animation: drift 3s infinite linear;
-        }
-
+        .plane-box { position: relative; font-size: 3rem; animation: flight 2s infinite ease-in-out; }
         @keyframes flight {
             0%, 100% { transform: translateY(0) rotate(5deg); }
             50% { transform: translateY(-15px) rotate(-5deg); }
-        }
-
-        @keyframes drift {
-            0% { transform: translateX(100px); opacity: 0; }
-            100% { transform: translateX(-100px); opacity: 0; }
-        }
-
-        .loading-text {
-            margin-top: 2rem;
-            font-weight: 700;
-            letter-spacing: 0.1em;
-            animation: pulse 1.5s infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.7; transform: scale(0.95); }
         }
 
         .category-dot { transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); cursor: pointer; }
@@ -295,11 +287,8 @@
         <!-- Loading Overlay -->
         <transition name="fade">
             <div v-if="isLoading" class="loading-overlay">
-                <div class="cloud-bg" style="top: 35%; right: 20%; animation-delay: 0s;"><i class="fa-solid fa-cloud"></i></div>
-                <div class="cloud-bg" style="top: 45%; left: 15%; animation-delay: 1.5s;"><i class="fa-solid fa-cloud"></i></div>
                 <div class="plane-box"><i class="fa-solid fa-plane"></i></div>
-                <div class="loading-text"><span class="text-sm">正在同步雲端行程...</span></div>
-                <div class="absolute bottom-10 text-[10px] opacity-40 uppercase tracking-widest">Created by Jenhsun</div>
+                <div class="mt-8 font-bold animate-pulse">正在載入專屬行程...</div>
             </div>
         </transition>
         
@@ -314,9 +303,9 @@
                 </h1>
             </div>
             <div class="flex items-center gap-2">
-                <div class="text-[9px] text-green-500 font-bold bg-green-50 px-2 py-1 rounded-full flex items-center gap-1 shadow-sm">
-                    <i class="fa-solid fa-cloud"></i> 雲端同步中
-                </div>
+                <button @click="showIdModal = true" class="text-[10px] text-blue-500 font-bold bg-blue-50 px-3 py-1.5 rounded-full flex items-center gap-1 shadow-sm border border-blue-100">
+                    <i class="fa-solid fa-share-nodes"></i> 分享行程
+                </button>
             </div>
         </header>
 
@@ -440,14 +429,50 @@
             </button>
         </nav>
 
-        <!-- 彈窗 (Modal) -->
+        <!-- 分享 ID 彈窗 -->
+        <transition name="slide-up">
+            <div v-if="showIdModal" class="fixed inset-0 z-[60] flex items-center justify-center p-6">
+                <div class="absolute inset-0 bg-black/60 backdrop-blur-md" @click="showIdModal = false"></div>
+                <div class="bg-white w-full max-w-sm rounded-[32px] p-8 relative z-10 shadow-2xl">
+                    <h3 class="text-xl font-bold text-gray-800 mb-2">同步與分享</h3>
+                    <p class="text-xs text-gray-400 mb-6">更換裝置或與好友共編時，請使用下方 ID。</p>
+                    
+                    <div class="space-y-6">
+                        <div class="bg-gray-50 p-4 rounded-2xl border border-gray-100">
+                            <label class="text-[10px] font-bold text-blue-500 uppercase block mb-1">目前行程 ID</label>
+                            <div class="flex items-center justify-between">
+                                <span class="font-mono font-bold text-lg text-gray-700">{{ tripId }}</span>
+                                <button @click="copyTripId" class="text-blue-500 hover:scale-110 active:scale-95 transition-transform">
+                                    <i class="fa-solid fa-copy"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="relative">
+                            <div class="flex items-center gap-2 mb-2">
+                                <div class="h-px bg-gray-100 flex-1"></div>
+                                <span class="text-[10px] text-gray-300 font-bold">載入現有行程</span>
+                                <div class="h-px bg-gray-100 flex-1"></div>
+                            </div>
+                            <input v-model="inputId" placeholder="輸入好友的 Trip ID" class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-100 outline-none">
+                            <button @click="switchTrip(inputId)" class="w-full mt-3 py-3 bg-gray-800 text-white rounded-2xl font-bold text-sm shadow-lg active:bg-black">
+                                切換行程
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <button @click="showIdModal = false" class="mt-6 w-full text-gray-400 text-xs font-bold py-2">關閉</button>
+                </div>
+            </div>
+        </transition>
+
+        <!-- 行程編輯彈窗 -->
         <transition name="slide-up">
             <div v-if="showModal" class="fixed inset-0 z-50 flex items-end">
                 <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" @click="closeModal"></div>
                 <div class="bg-white w-full rounded-t-[32px] p-6 relative z-10 h-[90vh] flex flex-col shadow-2xl">
                     <div class="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6 shrink-0"></div>
                     <h3 class="text-xl font-bold text-gray-800 mb-4">{{ isEditing ? '編輯行程' : '新增行程' }}</h3>
-                    
                     <form @submit.prevent="saveEvent" class="space-y-4 overflow-y-auto flex-1 pb-6 no-scrollbar">
                         <div class="grid grid-cols-2 gap-4">
                             <div>
@@ -464,26 +489,21 @@
                                 </select>
                             </div>
                         </div>
-                        
                         <div>
                             <label class="text-[10px] text-gray-400 font-bold ml-1 mb-1 block">地點名稱</label>
                             <input v-model="form.location" placeholder="輸入地點名稱" required class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold">
                         </div>
-
-                        <!-- Google 地圖連結輸入框 -->
                         <div class="bg-blue-50/50 p-3 rounded-2xl border border-blue-100">
                             <label class="text-[10px] text-blue-500 font-bold ml-1 mb-1 block flex items-center gap-1">
                                 <i class="fa-solid fa-link"></i> Google 地圖連結 (選填)
                             </label>
-                            <input v-model="form.mapUrl" placeholder="貼上 Google Maps 網址 (https://...)" 
-                                   class="w-full bg-white border border-blue-100 rounded-xl px-4 py-3 text-xs outline-none focus:ring-1 focus:ring-blue-400">
-                            <p class="text-[9px] text-gray-400 mt-2 px-1">貼上網址後，點擊行程時可直接精確定位該地點。</p>
+                            <input v-model="form.mapUrl" placeholder="貼上 Google Maps 網址" 
+                                   class="w-full bg-white border border-blue-100 rounded-xl px-4 py-3 text-xs outline-none">
                         </div>
-
                         <div class="grid grid-cols-2 gap-4">
                             <div>
                                 <label class="text-[10px] text-gray-400 font-bold ml-1 mb-1 block">預估金額</label>
-                                <input v-model.number="form.cost" type="number" placeholder="金額" class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm">
+                                <input v-model.number="form.cost" type="number" class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm">
                             </div>
                             <div>
                                 <label class="text-[10px] text-gray-400 font-bold ml-1 mb-1 block">幣別</label>
@@ -493,13 +513,11 @@
                                 </select>
                             </div>
                         </div>
-
                         <div>
                             <label class="text-[10px] text-gray-400 font-bold ml-1 mb-1 block">行程備註</label>
-                            <textarea v-model="form.note" rows="2" placeholder="備註..." class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm"></textarea>
+                            <textarea v-model="form.note" rows="2" class="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm"></textarea>
                         </div>
                     </form>
-
                     <div class="pt-4 flex space-x-3 mt-auto">
                         <button type="button" @click="closeModal" class="flex-1 py-4 bg-gray-100 text-gray-600 rounded-2xl font-bold">取消</button>
                         <button @click="saveEvent" class="flex-2 py-4 bg-blue-600 text-white rounded-2xl font-bold w-[60%] active:bg-blue-700 shadow-lg">儲存行程</button>
